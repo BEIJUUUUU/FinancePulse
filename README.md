@@ -104,7 +104,7 @@ pip install -r requirements.txt
 | `TZ` | 容器时区 (强制上海时间) | `Asia/Shanghai` |
 | `SENDER_EMAIL` | 发件人 QQ 邮箱 | `your_qq@qq.com` |
 | `SENDER_AUTH_CODE` | 16 位 SMTP 授权码 | `abcdefghijklmnop` |
-| `RECEIVER_EMAIL` | 接收邮箱 (可与发件人相同) | `your_qq@qq.com` |
+| `RECEIVER_EMAIL` | 接收邮箱 (支持逗号分隔多邮箱群发) | `a@qq.com,b@qq.com` |
 | `LLM_API_KEY` | 大模型 API Key | `sk-xxxxxxxxxxxxxxxx` |
 | `LLM_MODEL` | 模型名称 | `deepseek-v4-flash` |
 | `CRON_TIMES` | 定时推送时间点 (逗号分隔) | `08:30,12:00,16:00` |
@@ -124,6 +124,7 @@ pip install -r requirements.txt
 3. 填写配置并生效：
    - 在 FinancePulse 设置页面中填入发件人 QQ 邮箱与 16 位授权码。
    - 接收人邮箱直接填写该 QQ 邮箱 (或保持留空，默认发给自己)。自己发给自己可避免垃圾邮件拦截，微信将即时接收卡片通知。
+   - 支持多收件人群发：接收人邮箱填入多个地址并用逗号分隔即可 (如 `a@qq.com,b@qq.com`)。
 
 ---
 

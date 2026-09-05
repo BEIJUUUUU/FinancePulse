@@ -115,7 +115,7 @@ def _fetch_cls_akshare(limit: int = 30) -> list[dict]:
 
 def fetch_cls_news(limit: int = 20, enabled_sources: list[str] = None) -> list[dict]:
     """
-    根据勾选的信源动态抓取财经快讯
+    根据勾选的信源并发抓取财经快讯 (ThreadPoolExecutor 多路同时请求，总耗时≈单源耗时)
     :param limit: 抓取条数
     :param enabled_sources: 启用的信源列表，如 ['sina', 'wscn', 'cls']
     """
@@ -125,25 +125,28 @@ def fetch_cls_news(limit: int = 20, enabled_sources: list[str] = None) -> list[d
     all_raw_items = []
     fetch_limit = max(limit + 10, 25)
 
-    if "sina" in enabled_sources:
-        try:
-            sina_res = _fetch_sina_live(limit=fetch_limit)
-            all_raw_items.extend(sina_res)
-        except Exception as e:
-            print(f"[信源] 新浪财经抓取跳过: {e}")
+    source_map = {
+        "sina": (_fetch_sina_live, "新浪财经"),
+        "wscn": (_fetch_wscn_live, "华尔街见闻"),
+        "cls": (_fetch_cls_akshare, "财联社"),
+    }
 
-    if "wscn" in enabled_sources:
-        try:
-            wscn_res = _fetch_wscn_live(limit=fetch_limit)
-            all_raw_items.extend(wscn_res)
-        except Exception as e:
-            print(f"[信源] 华尔街见闻抓取跳过: {e}")
+    active = [(fn, name) for key, (fn, name) in source_map.items() if key in enabled_sources]
+    if not active:
+        return all_raw_items
 
-    if "cls" in enabled_sources:
-        try:
-            cls_res = _fetch_cls_akshare(limit=fetch_limit)
-            all_raw_items.extend(cls_res)
-        except Exception as e:
-            print(f"[信源] 财联社抓取跳过: {e}")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    with ThreadPoolExecutor(max_workers=len(active)) as executor:
+        future_to_name = {
+            executor.submit(fn, limit=fetch_limit): name for fn, name in active
+        }
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                items = future.result()
+                all_raw_items.extend(items)
+            except Exception as e:
+                print(f"[信源] {name} 抓取跳过: {e}")
 
     return all_raw_items

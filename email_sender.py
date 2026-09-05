@@ -1,7 +1,9 @@
 """
 邮件推送核心引擎 (规范 RFC5322 标准协议，完全兼容 QQ 邮箱 / 163 邮箱 / 企业邮)
+支持单收件人与多收件人群发 (逗号/分号/中文逗号分隔均可)
 """
 import os
+import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -9,6 +11,16 @@ from email.mime.base import MIMEBase
 from email import encoders
 from email.header import Header
 from email.utils import formataddr
+
+def _parse_receivers(receiver_email: str, fallback: str = "") -> list[str]:
+    """解析收件人字符串，支持中英文逗号、分号、空格等多种分隔符"""
+    if not receiver_email:
+        receiver_email = fallback
+    raw = receiver_email.replace("，", ",").replace("；", ";").replace(";", ",").replace(" ", ",")
+    receivers = [r.strip() for r in raw.split(",") if r.strip()]
+    # 简单格式校验
+    valid = [r for r in receivers if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", r)]
+    return valid
 
 def send_email_digest(
     smtp_server: str,
@@ -21,18 +33,20 @@ def send_email_digest(
     attachment_path: str = None
 ) -> bool:
     """
-    通过 SMTP SSL 发送财经早报邮件 (严格遵守腾讯 QQ 邮箱 RFC5322 规范)
+    通过 SMTP SSL 发送财经早报邮件 (支持多收件人群发)
     """
     if not sender_email or not sender_auth_code:
         print("[警告] 未配置发件人邮箱或授权码，跳过邮件发送。")
         return False
 
-    receiver_email = receiver_email.strip() or sender_email.strip()
+    receivers = _parse_receivers(receiver_email, fallback=sender_email)
+    if not receivers:
+        print("[警告] 未找到有效的收件人邮箱，跳过邮件发送。")
+        return False
 
     message = MIMEMultipart("related")
-    # 严格按照 QQ 邮箱规范格式化 From 和 To 标头
     message["From"] = formataddr(("FinancePulse 财经早报", sender_email))
-    message["To"] = formataddr(("我的关注", receiver_email))
+    message["To"] = ", ".join(receivers)
     message["Subject"] = Header(subject, "utf-8")
 
     # 挂载精美 HTML 正文
@@ -56,12 +70,14 @@ def send_email_digest(
             print(f"[提示] 附件挂载异常: {e}")
 
     try:
-        # QQ 邮箱推荐 SSL 465 端口
-        server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=20)
         server.login(sender_email, sender_auth_code)
-        server.sendmail(sender_email, [receiver_email], message.as_string())
+        server.sendmail(sender_email, receivers, message.as_string())
         server.quit()
-        print(f"[成功] 邮件已成功送达目标邮箱: {receiver_email}！")
+        if len(receivers) > 1:
+            print(f"[成功] 群发完成！已送达 {len(receivers)} 个收件邮箱: {', '.join(receivers)}")
+        else:
+            print(f"[成功] 邮件已成功送达目标邮箱: {receivers[0]}！")
         return True
     except smtplib.SMTPAuthenticationError:
         print("[错误] 授权码或账号认证失败！请确认 QQ 邮箱网页版是否已开启 POP3/SMTP 并正确复制 16 位授权码。")

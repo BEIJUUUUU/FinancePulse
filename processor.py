@@ -172,20 +172,23 @@ def build_html_card(news_list: list[dict]) -> str:
 
         tag_badge = f'<span style="background: #f3f4f6; color: #4b5563; font-size: 11px; padding: 2px 7px; border-radius: 9999px; margin-left: 4px;">{tag}</span>'
 
-        industry_bar = ""
-        if (beneficiary and beneficiary != "无") or (adverse and adverse != "无"):
-            ben_txt = f'<span style="color: #15803d; font-weight: 600;">受益: {beneficiary}</span>' if (beneficiary and beneficiary != "无") else ""
-            adv_txt = f'<span style="color: #b91c1c; font-weight: 600; margin-left: 10px;">受损: {adverse}</span>' if (adverse and adverse != "无") else ""
-            industry_bar = f"""
-            <div style="margin-top: 6px; font-size: 11px; background: #f8fafc; padding: 4px 8px; border-radius: 6px; display: inline-block;">
-                {ben_txt} {adv_txt}
+        # 行业影响细分栏 (始终展示，与 AI 诊断报告字段完全对齐)
+        ben_clean = beneficiary if (beneficiary and beneficiary != "无") else "暂无明显受益板块"
+        adv_clean = adverse if (adverse and adverse != "无") else "暂无明显受损板块"
+        impact_txt = f" · {impact}" if impact else ""
+        industry_bar = f"""
+            <div style="margin-top: 8px; font-size: 11px; background: #f8fafc; border: 1px solid #eef2f7; padding: 6px 10px; border-radius: 8px; line-height: 1.6;">
+                <span style="color: #15803d; font-weight: 600;">受益板块: {ben_clean}</span>
+                <span style="color: #cbd5e1; margin: 0 6px;">|</span>
+                <span style="color: #b91c1c; font-weight: 600;">受损板块: {adv_clean}</span>
+                <span style="color: #94a3b8; margin-left: 8px;">影响程度: {impact.strip(' ·') or '中性'}</span>
             </div>
             """
 
         ai_box = ""
         if ai_comment:
             ai_box = f"""
-            <div style="margin-top: 8px; background: #f5f3ff; border-left: 3px solid #7c3aed; padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 12px; color: #5b21b6; line-height: 1.5;">
+            <div style="margin-top: 8px; background: #f5f3ff; border-left: 3px solid #7c3aed; padding: 8px 12px; border-radius: 0 8px 8px 0; font-size: 12px; color: #5b21b6; line-height: 1.6;">
                 <b>AI 投研视点：</b>{ai_comment} <span style="font-size: 10px; color: #8b5cf6; margin-left: 4px;">(仅供参考)</span>
             </div>
             """

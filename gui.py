@@ -359,7 +359,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         r3 = ctk.CTkFrame(c1, fg_color="transparent")
         r3.pack(fill="x", padx=20, pady=(6, 18))
         ctk.CTkLabel(r3, text="接收人邮箱 (微信接收):", width=140, anchor="w", font=self.f_body).pack(side="left")
-        self.ent_receiver = ctk.CTkEntry(r3, width=320, corner_radius=8, placeholder_text="填入发件人或留空即默认发给自己")
+        self.ent_receiver = ctk.CTkEntry(r3, width=320, corner_radius=8, placeholder_text="多个邮箱用逗号隔开即可群发，留空默认发给自己")
         self.ent_receiver.pack(side="left", padx=10)
 
         # 2. 信息源与去重
@@ -1098,7 +1098,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                     model=model,
                     system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                     reasoning_level=self._get_reasoning_level(),
-                    max_analyze=15
+                    max_analyze=12
                 )
                 self.current_news_list = analyzed
                 self.after(0, self._render_cards, self.current_news_list)
@@ -1168,14 +1168,15 @@ class AppleStyleFinanceApp(ctk.CTk):
                 justify="left"
             ).pack(anchor="w", padx=14, pady=(2, 4))
 
-            # 行业细分条
-            if (ben and ben != "无") or (adv and adv != "无"):
-                ind_line = ctk.CTkFrame(card, fg_color="transparent")
-                ind_line.pack(fill="x", padx=14, pady=(0, 4))
-                if ben and ben != "无":
-                    ctk.CTkLabel(ind_line, text=f"受益行业: {ben}", font=self.f_small_bold, text_color="#15803d").pack(side="left", padx=(0, 14))
-                if adv and adv != "无":
-                    ctk.CTkLabel(ind_line, text=f"受损行业: {adv}", font=self.f_small_bold, text_color="#b91c1c").pack(side="left")
+            # 行业影响细分条 (始终展示，与邮件研报和诊断报告对齐)
+            ind_line = ctk.CTkFrame(card, fg_color="transparent")
+            ind_line.pack(fill="x", padx=14, pady=(0, 4))
+            ben_show = ben if (ben and ben != "无") else "暂无明显受益板块"
+            adv_show = adv if (adv and adv != "无") else "暂无明显受损板块"
+            impact_show = impact if impact else "中性"
+            ctk.CTkLabel(ind_line, text=f"受益板块: {ben_show}", font=self.f_small_bold, text_color="#15803d").pack(side="left", padx=(0, 12))
+            ctk.CTkLabel(ind_line, text=f"受损板块: {adv_show}", font=self.f_small_bold, text_color="#b91c1c").pack(side="left", padx=(0, 12))
+            ctk.CTkLabel(ind_line, text=f"影响程度: {impact_show}", font=self.f_small, text_color="gray").pack(side="left")
 
             # AI 投研视点专属高亮底框
             if ai_comment:
@@ -1223,6 +1224,8 @@ class AppleStyleFinanceApp(ctk.CTk):
             return
 
         # 校验 2：判断是否已执行过 AI 研报分析，给出明确确认选择
+        receiver_list = [r.strip() for r in receiver.replace("，", ",").replace("；", ";").replace(";", ",").split(",") if r.strip()]
+        recv_desc = f"{len(receiver_list)} 个收件邮箱" if len(receiver_list) > 1 else receiver_list[0] if receiver_list else receiver
         has_ai = any("ai_comment" in item for item in self.current_news_list)
         need_run_ai = False
 
@@ -1239,14 +1242,14 @@ class AppleStyleFinanceApp(ctk.CTk):
                     return
                 need_run_ai = ans
             else:
-                if not messagebox.askyesno("推送确认", f"确定将当前的 {len(self.current_news_list)} 条快讯立即推送到邮箱与微信？"):
+                if not messagebox.askyesno("推送确认", f"确定将当前的 {len(self.current_news_list)} 条快讯立即推送到 {recv_desc}？"):
                     return
         else:
-            if not messagebox.askyesno("推送确认", f"确定将已包含 AI 行业研报视点的 {len(self.current_news_list)} 条精选快讯立即推送到邮箱与微信？"):
+            if not messagebox.askyesno("推送确认", f"确定将已包含 AI 行业研报视点的 {len(self.current_news_list)} 条精选快讯立即推送到 {recv_desc}？"):
                 return
 
         self.btn_push.configure(state="disabled", text="正在发送...")
-        self.log(f"开始执行推送流程，目标邮箱: {receiver} ...")
+        self.log(f"开始执行推送流程，目标: {recv_desc} ...")
 
         def worker():
             try:
@@ -1262,7 +1265,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                         model=self.combo_ai_model.get().strip(),
                         system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                         reasoning_level=self._get_reasoning_level(),
-                        max_analyze=15
+                        max_analyze=12
                     )
                     self.current_news_list = data
                     self.after(0, self._render_cards, data)
