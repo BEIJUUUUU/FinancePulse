@@ -5,6 +5,7 @@ FinancePulse - 现代化桌面智能研报与微信推送助手 (Apple 极简高
 import os
 import sys
 import ctypes
+import queue
 import threading
 import time
 from datetime import datetime
@@ -27,10 +28,20 @@ except Exception:
         pass
 
 import config
+import history_db
+import flash_monitor
 from fetcher import fetch_cls_news
-from processor import filter_and_clean_news, build_html_card, export_to_excel
+from processor import filter_and_clean_news, mark_watchlist, prioritize_watchlist, build_html_card, export_to_excel
 from email_sender import send_email_digest
 from llm_analyzer import analyze_news_with_llm, fetch_available_models, LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT
+
+# 3. 系统托盘支持 (pystray + Pillow，缺失时优雅降级)
+try:
+    import pystray
+    from PIL import Image
+    TRAY_AVAILABLE = True
+except Exception:
+    TRAY_AVAILABLE = False
 
 # Apple 设计规范调色板
 APPLE_BLUE = "#007AFF"
@@ -80,6 +91,14 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.current_news_list = []
         self._resize_timer = None
 
+        # 突发监控状态
+        self.flash_stop_event = threading.Event()
+        self.flash_thread = None
+
+        # 托盘动作队列 (线程安全地把托盘菜单动作转发到 Tk 主线程)
+        self._tray_actions = queue.Queue()
+        self._tray_icon = None
+
         self._build_apple_ui()
         self._load_config_to_ui()
         self._switch_page("dash")
@@ -87,7 +106,19 @@ class AppleStyleFinanceApp(ctk.CTk):
         # 窗口缩放防抖机制：拖动窗口大小时暂停重排，松开鼠标后一次性平滑更新
         self.bind("<Configure>", self._on_window_configure)
 
-        self.log("系统已就绪。已启用高分屏 DPI 渲染与高性能抗抖动引擎。")
+        # 关闭窗口 = 最小化到系统托盘 (后台定时与突发监控继续运行)
+        self.protocol("WM_DELETE_WINDOW", self._on_window_close)
+
+        # 初始化系统托盘
+        self._init_tray()
+        # 主线程轮询托盘动作队列
+        self._poll_tray_actions()
+
+        # 若配置开启了突发监控，则自动恢复运行
+        if self.cfg.get("flash_enabled", False):
+            self.after(800, self._start_flash_monitor)
+
+        self.log("系统已就绪。关闭窗口将最小化到系统托盘，后台推送与突发监控持续运行。")
 
     def _on_window_configure(self, event):
         # 仅响应主窗口 resize，忽略子组件事件
@@ -99,6 +130,71 @@ class AppleStyleFinanceApp(ctk.CTk):
     def _do_smooth_layout_sync(self):
         """窗口缩放防抖完成后的平滑对齐"""
         pass
+
+    # ==================== 系统托盘常驻 ====================
+    def _init_tray(self):
+        """初始化系统托盘图标 (pystray 不可用时静默降级)"""
+        if not TRAY_AVAILABLE:
+            return
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "app_icon.png")
+            if not os.path.exists(icon_path):
+                return
+            image = Image.open(icon_path)
+            menu = pystray.Menu(
+                pystray.MenuItem("显示主窗口", self._tray_show, default=True),
+                pystray.MenuItem("立即抓取快讯", self._tray_fetch),
+                pystray.MenuItem("退出程序", self._tray_exit)
+            )
+            self._tray_icon = pystray.Icon("FinancePulse", image, "FinancePulse - 财经早报助手", menu)
+            self._tray_icon.run_detached()
+        except Exception as e:
+            print(f"[托盘] 初始化失败(不影响使用): {e}")
+
+    def _tray_show(self, icon=None, item=None):
+        self._tray_actions.put("show")
+
+    def _tray_fetch(self, icon=None, item=None):
+        self._tray_actions.put("fetch")
+
+    def _tray_exit(self, icon=None, item=None):
+        self._tray_actions.put("exit")
+
+    def _poll_tray_actions(self):
+        """主线程每 300ms 消费一次托盘动作队列 (线程安全)"""
+        try:
+            while True:
+                action = self._tray_actions.get_nowait()
+                if action == "show":
+                    self.deiconify()
+                    self.lift()
+                    self.focus_force()
+                elif action == "fetch":
+                    self._switch_page("dash")
+                    self._on_fetch_news()
+                elif action == "exit":
+                    self._really_quit()
+                    return
+        except queue.Empty:
+            pass
+        self.after(300, self._poll_tray_actions)
+
+    def _on_window_close(self):
+        """点击关闭按钮 → 最小化到托盘而非退出"""
+        self.withdraw()
+        self.log("窗口已最小化到系统托盘，后台定时与突发监控持续运行。")
+
+    def _really_quit(self):
+        """真正退出程序：停止所有后台线程与托盘"""
+        try:
+            self.is_scheduling = False
+            self.flash_stop_event.set()
+            if self._tray_icon:
+                self._tray_icon.stop()
+        except Exception:
+            pass
+        self.destroy()
+        os._exit(0)
 
     def _build_apple_ui(self):
         self.grid_columnconfigure(1, weight=1)
@@ -172,6 +268,41 @@ class AppleStyleFinanceApp(ctk.CTk):
             command=self._toggle_scheduler
         )
         self.btn_sched_toggle.pack(fill="x", padx=12, pady=(0, 12))
+
+        # 突发监控卡片
+        self.flash_card = ctk.CTkFrame(self.sidebar, corner_radius=14, fg_color=("gray85", "#27272a"))
+        self.flash_card.grid(row=6, column=0, padx=14, pady=(6, 10), sticky="ew")
+
+        ctk.CTkLabel(self.flash_card, text="🚨 突发要闻监控", font=self.f_nav_bold).pack(anchor="w", padx=14, pady=(12, 2))
+        self.flash_status_lbl = ctk.CTkLabel(self.flash_card, text="状态: 未开启 ⚪", font=self.f_small, text_color="gray")
+        self.flash_status_lbl.pack(anchor="w", padx=14, pady=(0, 10))
+
+        self.btn_flash_toggle = ctk.CTkButton(
+            self.flash_card,
+            text="开启突发监控",
+            height=32,
+            corner_radius=8,
+            fg_color="#f59e0b",
+            hover_color="#d97706",
+            font=self.f_nav_bold,
+            command=self._toggle_flash_monitor
+        )
+        self.btn_flash_toggle.pack(fill="x", padx=12, pady=(0, 12))
+
+        # 推送历史查看按钮
+        self.btn_history = ctk.CTkButton(
+            self.sidebar,
+            text="📜 查看推送历史",
+            height=32,
+            corner_radius=10,
+            anchor="w",
+            font=self.f_nav,
+            fg_color="transparent",
+            text_color=("gray10", "gray90"),
+            hover_color=("gray75", "gray25"),
+            command=self._show_push_history
+        )
+        self.btn_history.grid(row=7, column=0, padx=14, pady=5, sticky="ew")
 
         # 外观切换
         ctk.CTkLabel(self.sidebar, text="外观模式:", font=self.f_small, text_color="gray").grid(row=11, column=0, padx=20, pady=(0, 2), sticky="w")
@@ -416,6 +547,36 @@ class AppleStyleFinanceApp(ctk.CTk):
 
         self.chk_cat_social = ctk.CTkCheckBox(r_cats, text="社会民生 (灾害/事故/通报)", font=self.f_body)
         self.chk_cat_social.pack(side="left")
+
+        # 2.5 自选监控与突发要闻卡片
+        c_watch = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
+        c_watch.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(c_watch, text="⭐ 自选监控与突发要闻实时推送", font=ctk.CTkFont(family="Microsoft YaHei UI", size=15, weight="bold")).pack(anchor="w", padx=20, pady=(16, 4))
+
+        rw1 = ctk.CTkFrame(c_watch, fg_color="transparent")
+        rw1.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(rw1, text="自选股/关键词监控:", width=140, anchor="w", font=self.f_body).pack(side="left")
+        self.ent_watchlist = ctk.CTkEntry(rw1, width=400, corner_radius=8, placeholder_text="逗号分隔，如: 宁德时代,半导体,光伏 (命中将红色高亮并置顶)")
+        self.ent_watchlist.pack(side="left", padx=10)
+
+        rw2 = ctk.CTkFrame(c_watch, fg_color="transparent")
+        rw2.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(rw2, text="突发要闻关键词:", width=140, anchor="w", font=self.f_body).pack(side="left")
+        self.ent_flash_kws = ctk.CTkEntry(rw2, width=400, corner_radius=8, placeholder_text="如: 降息,降准,证监会,暴涨,暴跌 (命中立即推送，无需等待定时)")
+        self.ent_flash_kws.pack(side="left", padx=10)
+
+        rw3 = ctk.CTkFrame(c_watch, fg_color="transparent")
+        rw3.pack(fill="x", padx=20, pady=(4, 16))
+        ctk.CTkLabel(rw3, text="突发轮询间隔 (分钟):", width=140, anchor="w", font=self.f_body).pack(side="left")
+        self.spin_flash_interval = ctk.CTkEntry(rw3, width=80, corner_radius=8, placeholder_text="2")
+        self.spin_flash_interval.pack(side="left", padx=10)
+        ctk.CTkLabel(
+            rw3,
+            text="开启监控后每 N 分钟轻量轮询一次信源，命中即秒级推送到微信，24 小时内不重复推送",
+            font=self.f_small,
+            text_color="gray"
+        ).pack(side="left", padx=10)
 
         # 3. 大模型 AI 分析设置 (支持一键拉取可用模型与思考深度)
         c2 = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
@@ -921,6 +1082,86 @@ class AppleStyleFinanceApp(ctk.CTk):
             command=diag_win.destroy
         ).pack(fill="x")
 
+    def _toggle_flash_monitor(self):
+        if not self.flash_thread or not self.flash_thread.is_alive():
+            if not self.ent_flash_kws.get().strip() and not self.ent_watchlist.get().strip():
+                messagebox.showwarning("提示", "请先在【系统与 AI 配置】中填写突发关键词或自选监控词！")
+                self._switch_page("settings")
+                return
+            self._start_flash_monitor()
+        else:
+            self._stop_flash_monitor()
+
+    def _start_flash_monitor(self):
+        if self.flash_thread and self.flash_thread.is_alive():
+            return
+        self.flash_stop_event.clear()
+        self.flash_thread = flash_monitor.FlashMonitor(self._flash_push, self.flash_stop_event)
+        self.flash_thread.start()
+
+        self.btn_flash_toggle.configure(text="停止突发监控", fg_color=APPLE_RED, hover_color="#cc2f26")
+        self.flash_status_lbl.configure(text="状态: 监控中 🟢", text_color="#f59e0b")
+        interval = self.spin_flash_interval.get().strip() or "2"
+        self.log(f"🚨 突发要闻监控已开启！每 {interval} 分钟巡检一次，命中即秒级推送。")
+
+    def _stop_flash_monitor(self):
+        self.flash_stop_event.set()
+        self.flash_thread = None
+        self.btn_flash_toggle.configure(text="开启突发监控", fg_color="#f59e0b", hover_color="#d97706")
+        self.flash_status_lbl.configure(text="状态: 未开启 ⚪", text_color="gray")
+        self.log("🚨 突发要闻监控已停止。")
+
+    def _flash_push(self, hits):
+        """突发监控命中回调：立即静默推送 (不经 AI 保证秒级时效)，并同步到界面"""
+        self.after(0, lambda: self.log(f"🚨 命中 {len(hits)} 条突发/自选要闻，正在即时推送..."))
+        self.after(0, lambda: self._render_cards(hits))
+
+        def worker():
+            try:
+                sender = self.ent_sender.get().strip()
+                auth = self.ent_auth.get().strip()
+                receiver = self.ent_receiver.get().strip() or sender
+                if not sender or not auth:
+                    self.after(0, lambda: self.log("🚨 邮箱未配置，突发要闻仅在界面呈现。"))
+                    history_db.record_pushed(hits)
+                    return
+
+                csv_file = os.path.join(os.path.dirname(__file__), "财经热点汇总.csv")
+                export_to_excel(hits, output_path=csv_file)
+                html_card = build_html_card(hits)
+                subject = f"🚨 突发要闻提醒 ({datetime.now().strftime('%H:%M')})"
+
+                ok = send_email_digest(
+                    smtp_server=self.cfg.get("smtp_server", "smtp.qq.com"),
+                    smtp_port=int(self.cfg.get("smtp_port", 465)),
+                    sender_email=sender,
+                    sender_auth_code=auth,
+                    receiver_email=receiver,
+                    subject=subject,
+                    html_content=html_card,
+                    attachment_path=csv_file
+                )
+                if ok:
+                    history_db.record_pushed(hits)
+                    self.after(0, lambda: self.log(f"🚨 突发要闻已即时推送至 {receiver}！"))
+                else:
+                    self.after(0, lambda: self.log("🚨 突发推送失败，下轮巡检将自动重试。"))
+            except Exception as e:
+                self.after(0, lambda: self.log(f"🚨 突发推送异常: {e}"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_push_history(self):
+        """在日志窗口展示最近 20 条推送历史"""
+        records = history_db.recent_pushes(limit=20)
+        if not records:
+            self.log("📜 暂无推送历史记录。")
+            return
+        self.log(f"📜 最近 {len(records)} 条推送历史:")
+        for r in records:
+            tag_info = f"[{r['tag']}]" if r.get("tag") else ""
+            self.log(f"   {r['pushed_at'][5:16]} {tag_info} {r['title'][:40]}")
+
     def _on_sched_mode_changed(self):
         mode = self.sched_mode_var.get()
         if mode == "classic":
@@ -997,6 +1238,11 @@ class AppleStyleFinanceApp(ctk.CTk):
         else:
             self.combo_concurrency.set("串行保守 (推荐 · 兼容所有服务商)")
 
+        # 自选监控与突发监控配置
+        self.ent_watchlist.insert(0, self.cfg.get("watchlist", ""))
+        self.ent_flash_kws.insert(0, self.cfg.get("flash_keywords", ""))
+        self.spin_flash_interval.insert(0, str(self.cfg.get("flash_interval_minutes", 2)))
+
         self.ent_ai_key.insert(0, self.cfg.get("llm_api_key", ""))
         self.ent_ai_url.insert(0, self.cfg.get("llm_base_url", "https://api.deepseek.com"))
         self.combo_ai_model.set(self.cfg.get("llm_model", "deepseek-v4-flash"))
@@ -1056,6 +1302,12 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.cfg["llm_model"] = self.combo_ai_model.get().strip()
         self.cfg["llm_reasoning_level"] = self._get_reasoning_level()
         self.cfg["llm_max_concurrent"] = self._get_max_concurrent()
+        self.cfg["watchlist"] = self.ent_watchlist.get().strip()
+        self.cfg["flash_keywords"] = self.ent_flash_kws.get().strip()
+        try:
+            self.cfg["flash_interval_minutes"] = max(1, int(self.spin_flash_interval.get().strip()))
+        except ValueError:
+            self.cfg["flash_interval_minutes"] = 2
         self.cfg["custom_prompt"] = self.txt_prompt.get("1.0", "end").strip()
         self.cfg["schedule_mode"] = self.sched_mode_var.get()
         self.cfg["custom_times"] = self.ent_custom_times.get().strip()
@@ -1084,6 +1336,12 @@ class AppleStyleFinanceApp(ctk.CTk):
                 # 传入 allowed_categories 进行领域精准过滤！
                 cleaned = filter_and_clean_news(raw, allowed_categories=categories, dedup_threshold=threshold, max_limit=limit)
 
+                # 自选股/关键词监控标记与置顶
+                watchlist = [k.strip() for k in self.ent_watchlist.get().replace("，", ",").split(",") if k.strip()]
+                mark_watchlist(cleaned, watchlist)
+                cleaned = prioritize_watchlist(cleaned)
+                watch_count = sum(1 for x in cleaned if x.get("watch_hit"))
+
                 # 若开启 AI 且配了 Key，自动触发提炼
                 if self.switch_llm.get() and self.ent_ai_key.get().strip():
                     self.after(0, lambda: self.log("正在调用大模型进行行业影响分析与点评..."))
@@ -1097,12 +1355,16 @@ class AppleStyleFinanceApp(ctk.CTk):
                         max_concurrent=self._get_max_concurrent(),
                         max_analyze=12
                     )
+                    mark_watchlist(analyzed, watchlist)
+                    analyzed = prioritize_watchlist(analyzed)
                     self.current_news_list = analyzed
                 else:
                     self.current_news_list = cleaned
 
                 self.after(0, self._render_cards, self.current_news_list)
                 self.after(0, lambda: self.combo_cat_filter.set("全部分类"))
+                if watch_count:
+                    self.after(0, lambda: self.log(f"⭐ 检测到 {watch_count} 条自选监控命中快讯，已置顶展示！"))
             except Exception as e:
                 self.after(0, lambda: self.log(f"抓取异常: {e}"))
             finally:
@@ -1169,6 +1431,8 @@ class AppleStyleFinanceApp(ctk.CTk):
             adv = item.get("adverse", "")
             tag = item.get("tag", "")
             src = item.get("source", "快讯")
+            watch_hit = item.get("watch_hit", "")
+            flash_hit = item.get("flash_hit", "")
 
             # 扁平化单层 Card Frame
             card = ctk.CTkFrame(
@@ -1187,6 +1451,12 @@ class AppleStyleFinanceApp(ctk.CTk):
             ctk.CTkLabel(head_line, text=f"#{idx}", font=self.f_small_bold, text_color=APPLE_BLUE).pack(side="left")
             ctk.CTkLabel(head_line, text=f"{t} · {src}", font=self.f_small, text_color="gray").pack(side="left", padx=8)
             ctk.CTkLabel(head_line, text=title, font=self.f_title, anchor="w").pack(side="left", padx=4, fill="x", expand=True)
+
+            # 自选/突发命中徽章
+            if watch_hit:
+                ctk.CTkLabel(head_line, text=f"⭐ {watch_hit}", font=self.f_small_bold, text_color=APPLE_RED).pack(side="right", padx=6)
+            elif flash_hit:
+                ctk.CTkLabel(head_line, text=f"🚨 {flash_hit}", font=self.f_small_bold, text_color="#f59e0b").pack(side="right", padx=6)
 
             if tag:
                 ctk.CTkLabel(head_line, text=tag, font=self.f_small, text_color=APPLE_PURPLE).pack(side="right", padx=6)
@@ -1293,6 +1563,17 @@ class AppleStyleFinanceApp(ctk.CTk):
             try:
                 data = list(self.current_news_list)
 
+                # 阶段 0: 防重复推送过滤 (24 小时内已推送的内容自动剔除)
+                fresh = history_db.filter_unpushed(data, hours=24)
+                skipped = len(data) - len(fresh)
+                if not fresh:
+                    self.after(0, lambda: self.log("⚠️ 本次所选快讯在 24 小时内均已推送过，已自动跳过，避免重复打扰。"))
+                    self.after(0, lambda: messagebox.showinfo("无需重复推送", "所选快讯在 24 小时内均已推送过，本次已自动跳过。"))
+                    return
+                data = fresh
+                if skipped > 0:
+                    self.after(0, lambda: self.log(f"防重复过滤: 自动剔除 {skipped} 条 24 小时内已推送的内容，实际推送 {len(data)} 条。"))
+
                 # 阶段 1: 若需先执行 AI 研判
                 if need_run_ai:
                     self.after(0, lambda: self.log("步骤 1/3: 正在调用大模型生成行业影响分析与情绪分级..."))
@@ -1332,6 +1613,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                     attachment_path=csv_file
                 )
                 if ok:
+                    history_db.record_pushed(data)
                     self.after(0, lambda: self.log(f"🎉 推送成功！已送达 {receiver}。微信开启QQ邮箱提醒的会立即收到弹窗！"))
                     self.after(0, lambda: messagebox.showinfo("发送成功", "研报已成功送达！若微信绑定了 QQ 邮箱提醒将立即收到带 AI 点评的微信卡片。"))
                 else:

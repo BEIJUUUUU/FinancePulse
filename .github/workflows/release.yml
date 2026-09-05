@@ -1,0 +1,59 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter pystray pillow pyinstaller
+
+      - name: Build executable
+        run: >
+          pyinstaller --noconsole --name=FinancePulse --icon=app_icon.ico
+          --collect-all customtkinter --add-data "app_icon.ico;." -y gui.py
+
+      - name: Prepare distribution
+        shell: pwsh
+        run: |
+          Copy-Item settings.example.json dist/FinancePulse/settings.json
+          Copy-Item README.md dist/FinancePulse/
+          Copy-Item LICENSE dist/FinancePulse/
+
+      - name: Compress package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/FinancePulse -DestinationPath FinancePulse-Windows-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinancePulse-Windows-x64
+          path: FinancePulse-Windows-x64.zip
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FinancePulse-Windows-x64.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -71,6 +71,21 @@ def _calculate_similarity(text1: str, text2: str) -> float:
 
     return 0.5 * seq_ratio + 0.5 * jaccard
 
+def mark_watchlist(news_list: list[dict], watchlist: list[str]) -> list[dict]:
+    """标记命中自选监控关键词的快讯 (item["watch_hit"] = 命中词，顿号分隔)"""
+    if not news_list or not watchlist:
+        return news_list
+    for item in news_list:
+        text = (item.get("title", "") + " " + item.get("content", "")).lower()
+        hits = [kw for kw in watchlist if kw.strip() and kw.strip().lower() in text]
+        if hits:
+            item["watch_hit"] = "、".join(hits)
+    return news_list
+
+def prioritize_watchlist(news_list: list[dict]) -> list[dict]:
+    """自选命中的快讯排到最前"""
+    return sorted(news_list, key=lambda x: 0 if x.get("watch_hit") else 1)
+
 def filter_and_clean_news(
     news_list: list[dict],
     keywords: list[str] = None,
@@ -162,6 +177,12 @@ def build_html_card(news_list: list[dict]) -> str:
         adverse = item.get("adverse", "")
         tag = item.get("tag", "综合")
         source = item.get("source", "权威快讯")
+        watch_hit = item.get("watch_hit", "")
+
+        # 自选命中徽章 (醒目红色高亮)
+        watch_badge = ""
+        if watch_hit:
+            watch_badge = f'<span style="background: #fef2f2; color: #dc2626; font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 700; border: 1px solid #fecaca; margin-left: 6px;">自选命中: {watch_hit}</span>'
 
         sentiment_badge = ""
         if sentiment:
@@ -198,7 +219,7 @@ def build_html_card(news_list: list[dict]) -> str:
             <div style="display: flex; align-items: center; margin-bottom: 6px;">
                 <span style="display: inline-block; background: #2563eb; color: #ffffff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 6px; margin-right: 8px;">#{idx}</span>
                 <span style="font-size: 12px; color: #6b7280; font-family: monospace;">{t} · {source}</span>
-                <span style="margin-left: auto;">{tag_badge} {sentiment_badge}</span>
+                <span style="margin-left: auto;">{watch_badge} {tag_badge} {sentiment_badge}</span>
             </div>
             <div style="font-size: 14px; font-weight: 700; color: #111827; line-height: 1.4; margin-bottom: 6px;">
                 {title}

@@ -34,5 +34,9 @@
     "llm_reasoning_level": "balanced",
     "llm_max_concurrent": 1,
     "custom_prompt": "",
+    "watchlist": "",
+    "flash_enabled": false,
+    "flash_keywords": "降息,降准,加息,证监会,国务院,突发,暴涨,暴跌,熔断,停火,开战,重大政策",
+    "flash_interval_minutes": 2,
     "ui_theme": "System"
 }

@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
     "llm_reasoning_level": "balanced",
     "llm_max_concurrent": 1,
     "custom_prompt": "",
+    "watchlist": "",
+    "flash_enabled": False,
+    "flash_keywords": "降息,降准,加息,证监会,国务院,突发,暴涨,暴跌,熔断,停火,开战,重大政策",
+    "flash_interval_minutes": 2,
     "ui_theme": "System"
 }
 
@@ -80,6 +84,19 @@ def load_config() -> dict:
         cfg["categories"] = [c.strip() for c in os.getenv("CATEGORIES").split(",") if c.strip()]
     if os.getenv("CUSTOM_PROMPT"):
         cfg["custom_prompt"] = os.getenv("CUSTOM_PROMPT").strip()
+
+    # 突发监控与自选监控配置
+    if os.getenv("WATCHLIST"):
+        cfg["watchlist"] = os.getenv("WATCHLIST").strip()
+    if os.getenv("FLASH_KEYWORDS"):
+        cfg["flash_keywords"] = os.getenv("FLASH_KEYWORDS").strip()
+    if os.getenv("FLASH_INTERVAL"):
+        try:
+            cfg["flash_interval_minutes"] = max(1, int(os.getenv("FLASH_INTERVAL")))
+        except ValueError:
+            pass
+    if os.getenv("FLASH_ENABLED", "").lower() in ("1", "true", "yes"):
+        cfg["flash_enabled"] = True
 
     return cfg
 

@@ -24,6 +24,9 @@ settings.json
 *.xlsx
 *.log
 
+# 本地推送历史数据库
+history.db
+
 # 编辑器配置
 .idea/
 .vscode/
