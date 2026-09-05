@@ -1,7 +1,6 @@
 """
 大模型 (LLM) 财经分析与点评引擎
-支持动态自定义 Prompt 提示词与思考强度 (Reasoning Depth) 调节
-全兼容 OpenAI 标准接口协议
+支持动态自定义 Prompt、自动获取可用模型列表、行业利好/利空细分与影响程度分级
 """
 import json
 import urllib.request
@@ -10,8 +9,8 @@ import urllib.error
 LLM_PROVIDERS = {
     "DeepSeek (深度求索)": {
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-        "note": "官方标准模型名 deepseek-chat (对应 V3) 或 deepseek-reasoner (对应 R1 深度思考)"
+        "model": "deepseek-v4-flash",
+        "note": "支持 deepseek-v4-flash / deepseek-v4-pro / deepseek-chat"
     },
     "Kimi / Moonshot (月之暗面)": {
         "base_url": "https://api.moonshot.cn/v1",
@@ -45,52 +44,95 @@ LLM_PROVIDERS = {
     }
 }
 
-DEFAULT_SYSTEM_PROMPT = """你是一位资深的宏观经济与证券市场投研分析师。
-请对输入的财经快讯列表进行专业过滤与深度提炼：
-1. 挑选出最具有投资决策价值、宏观或行业影响力的重点事件；
-2. 为每条资讯提供精炼的核心要点；
-3. 输出一句话【AI 点评 / 市场影响】，明确标出潜在利好/利空导向或宏观风向。
+DEFAULT_SYSTEM_PROMPT = """你是一位资深的证券市场与宏观经济投研分析师。
+请对输入的财经快讯列表进行专业过滤、深度研判与行业影响分级：
+1. 挑选出具有投资决策价值的核心事件；
+2. 为每条资讯提供精练标题(15字内)与事实摘要(50字内)；
+3. 明确指出【潜在受益行业】与【潜在受损行业】；
+4. 明确评估【市场影响程度】（可选: 重大影响 / 中度影响 / 轻度扰动）；
+5. 输出一句话【投研视点】(30字内)，给出客观逻辑传导；
+6. 情绪导向标注为【利好】/【利空】/【中性】。
 
-请严格返回如下 JSON 数组格式（严禁输出任何 markdown 格式标记、反引号或额外解释）：
+请严格返回如下 JSON 数组格式（严禁输出任何 markdown 格式标记、反引号或多余文字）：
 [
   {
     "time": "原始时间",
     "title": "精练标题(15字内)",
     "content": "核心事实摘要(50字内)",
-    "ai_comment": "一句话投研点评(30字内)",
-    "tag": "宏观/A股/美股/大宗/产业",
-    "sentiment": "利好/利空/中性"
+    "ai_comment": "一句话投研视点(30字内)",
+    "tag": "所属领域(宏观/A股/美股/产业/大宗)",
+    "sentiment": "利好/利空/中性",
+    "impact_degree": "重大影响/中度影响/轻度扰动",
+    "beneficiary": "潜在受益行业或板块(如: 算力硬件、半导体材料，无则填无)",
+    "adverse": "潜在受损行业或板块(如: 传统燃油车、海外高负债资产，无则填无)"
   }
 ]
 """
 
-# 针对不同思考强度的温度与引导设定
 REASONING_PROMPTS = {
     "fast": {
         "temperature": 0.1,
-        "suffix": "\n[要求: 采用快速提炼模式，严格以事实为依据，点评尽量简明扼要。]"
+        "suffix": "\n[分析模式: 快速提炼，紧扣核心事实，极简输出。分析结果仅供参考，不构成投资建议。]"
     },
     "balanced": {
         "temperature": 0.3,
-        "suffix": "\n[要求: 采用深度研判模式，注重宏观经济、行业供需与资本市场情绪的传导关系。]"
+        "suffix": "\n[分析模式: 深度研判，兼顾宏观政策传导与产业链上下游关联。分析结果仅供参考，不构成投资建议。]"
     },
     "deep": {
         "temperature": 0.5,
-        "suffix": "\n[要求: 采用长思维链推演模式，深入挖掘事件背后的次级衍生影响、潜在受益受损标的与宏观流动性冲击。]"
+        "suffix": "\n[分析模式: 长链推演，深度挖掘次级传导逻辑与行业分化。分析结果仅供参考，不构成投资建议。]"
     }
 }
+
+def fetch_available_models(base_url: str, api_key: str = "") -> list[str]:
+    """
+    通过 GET /v1/models 自动查询当前 API Key 支持的可用模型列表
+    """
+    if not base_url:
+        return []
+
+    endpoint = base_url.rstrip("/")
+    if not endpoint.endswith("/v1") and not endpoint.endswith("/models"):
+        endpoint = f"{endpoint}/v1/models"
+    elif endpoint.endswith("/v1"):
+        endpoint = f"{endpoint}/models"
+
+    headers = {
+        "User-Agent": "FinancePulse/2.5"
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        req = urllib.request.Request(endpoint, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            model_items = data.get("data", [])
+            model_ids = []
+            for item in model_items:
+                if isinstance(item, dict) and "id" in item:
+                    model_ids.append(item["id"])
+            if model_ids:
+                model_ids.sort()
+                print(f"[LLM] 成功获取到 {len(model_ids)} 个可用模型: {model_ids[:5]}...")
+                return model_ids
+    except Exception as e:
+        print(f"[LLM 提示] 获取模型列表异常: {e}")
+
+    return []
 
 def analyze_news_with_llm(
     news_list: list[dict],
     api_key: str = "",
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
     system_prompt: str = "",
-    reasoning_level: str = "balanced"
+    reasoning_level: str = "balanced",
+    max_analyze: int = 15
 ) -> list[dict]:
     """
-    调用大模型对财经资讯进行深度结构化分析与点评
-    :param reasoning_level: 思考强度，可选 'fast' (快速), 'balanced' (均衡推荐), 'deep' (深度推演)
+    调用大模型对财经资讯进行深度结构化分析与行业利好利空研判
+    :param max_analyze: 单次分析最大上限(默认15条最关键快讯，保证3-8秒内极速返回防超时)
     """
     if not news_list:
         return []
@@ -108,12 +150,13 @@ def analyze_news_with_llm(
     elif endpoint.endswith("/v1"):
         endpoint = f"{endpoint}/chat/completions"
 
+    # 截取前 max_analyze 条进行深度 AI 研判，杜绝超长 prompt 导致网络超时
+    target_news = news_list[:max_analyze]
     input_texts = []
-    for idx, item in enumerate(news_list, 1):
+    for idx, item in enumerate(target_news, 1):
         input_texts.append(f"{idx}. [{item.get('time', '')}] {item.get('title', '')} - {item.get('content', '')}")
-    user_prompt = "以下是最新抓取的全球与国内财经快讯列表，请精选并给出专业投研点评：\n" + "\n".join(input_texts)
+    user_prompt = "以下是精选财经快讯列表，请提炼要闻并输出行业利好利空与影响程度：\n" + "\n".join(input_texts)
 
-    # 结合思考强度
     prompt_config = REASONING_PROMPTS.get(reasoning_level, REASONING_PROMPTS["balanced"])
     base_prompt = system_prompt.strip() if system_prompt and system_prompt.strip() else DEFAULT_SYSTEM_PROMPT.strip()
     full_prompt = base_prompt + prompt_config["suffix"]
@@ -138,7 +181,7 @@ def analyze_news_with_llm(
             }
         )
 
-        with urllib.request.urlopen(req, timeout=40) as response:
+        with urllib.request.urlopen(req, timeout=45) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
             raw_reply = res_json["choices"][0]["message"]["content"].strip()
@@ -150,7 +193,10 @@ def analyze_news_with_llm(
 
             parsed_list = json.loads(raw_reply.strip())
             if isinstance(parsed_list, list) and len(parsed_list) > 0:
-                print(f"[LLM] 大模型分析成功 ({reasoning_level} 强度)！生成 {len(parsed_list)} 条精选专业点评。")
+                print(f"[LLM] 大模型分析成功 ({model})！成功生成 {len(parsed_list)} 条精选专业行业研判。")
+                # 如果用户抓取条数多于已分析条数，将剩余原始资讯拼接在后，保证完整性
+                if len(news_list) > max_analyze:
+                    parsed_list.extend(news_list[max_analyze:])
                 return parsed_list
 
     except urllib.error.HTTPError as e:
