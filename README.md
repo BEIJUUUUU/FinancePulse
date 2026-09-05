@@ -95,13 +95,24 @@ pip install -r requirements.txt
 ### Docker / NAS 部署 (推荐 7x24 小时无人值守)
 适合部署在群晖 (Synology)、极空间、绿联、威联通、TrueNAS、Unraid 等家用 NAS 或云服务器上，容器内置上海时区环境，全天候全自动执行定时早报推送。
 
-#### 一键 Compose 启动
-1. 下载项目中的 `docker-compose.yml` 与 `Dockerfile`；
-2. 编辑 `docker-compose.yml` 中的环境变量（填入你的 QQ 邮箱、授权码与大模型 API Key）；
-3. 执行启动命令：
+#### 方式一：云端镜像直拉 (推荐，NAS 上无需任何源码)
+1. 在 NAS 上新建一个文件夹，仅需放入一个编辑好的 `docker-compose.yml`；
+2. 编辑环境变量（填入你的 QQ 邮箱、授权码与大模型 API Key），镜像地址使用官方发布的 `ghcr.io/beijuuuuu/finance-pulse:latest`；
+3. 在 Container Manager / SSH 中启动：
    ```bash
    docker compose up -d
    ```
+
+#### 方式二：本地源码构建
+1. 将完整项目文件夹（必须包含 `Dockerfile`、`docker-compose.yml`、`config.py`、`fetcher.py`、`processor.py`、`llm_analyzer.py`、`email_sender.py`、`main.py`、`history_db.py`、`flash_monitor.py`、`settings.example.json`）上传到 NAS；
+2. 编辑 `docker-compose.yml`：注释掉 `image:` 行，取消注释 `build:` 两行；
+3. 启动：
+   ```bash
+   docker compose up -d
+   ```
+
+#### 数据持久化
+推送历史库 (`history.db`) 与表格归档 (`财经热点汇总.csv`) 自动写入容器内 `/app/data`，配合 compose 中的 `./data:/app/data` 挂载，容器重建升级后数据不丢失。
 
 #### 核心环境变量参考
 | 变量名 | 说明 | 示例值 |

@@ -1,0 +1,18 @@
+# 构建上下文排除项 (加速构建并防止敏感文件进入镜像)
+.git
+.github
+build
+dist
+__pycache__
+*.pyc
+history.db
+*.csv
+*.xlsx
+*.log
+settings.json
+*.zip
+gui.py
+gui.pyw
+run_gui.bat
+app_icon.ico
+app_icon.png

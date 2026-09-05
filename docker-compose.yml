@@ -1,11 +1,8 @@
-version: '3.8'
-
 services:
   finance-pulse:
-    image: beiju/finance-pulse:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # 方式一 (推荐)：直接拉取 GitHub 容器仓库的云端镜像
+    # 优点：NAS 上只需要这一个 docker-compose.yml 文件，无需准备任何源码
+    image: ghcr.io/beijuuuuu/finance-pulse:latest
     container_name: finance-pulse
     restart: unless-stopped
     environment:
@@ -15,6 +12,7 @@ services:
       # 邮箱推送配置 (填写你的 QQ 邮箱与 16 位 SMTP 授权码)
       - SENDER_EMAIL=your_qq@qq.com
       - SENDER_AUTH_CODE=your_16_char_smtp_code
+      # 接收邮箱支持逗号分隔多邮箱群发，留空默认发给自己
       - RECEIVER_EMAIL=your_qq@qq.com
 
       # 大模型 AI 配置 (支持 DeepSeek / Kimi / 智谱 / 通义千问 等)
@@ -22,6 +20,7 @@ services:
       - LLM_BASE_URL=https://api.deepseek.com
       - LLM_MODEL=deepseek-v4-flash
       - LLM_REASONING_LEVEL=balanced
+      - LLM_MAX_CONCURRENT=1
 
       # 抓取与定时配置
       - NEWS_LIMIT=20
@@ -30,6 +29,23 @@ services:
       - CATEGORIES=宏观政策,A股市场,科技产业,大宗商品,全球要闻
       - ENABLE_DEDUP=true
 
+      # 突发要闻实时监控 (命中关键词秒级推送)
+      - FLASH_ENABLED=1
+      - FLASH_INTERVAL=2
+      - FLASH_KEYWORDS=降息,降准,加息,证监会,暴涨,暴跌,熔断,停火
+
+      # 自选股/关键词监控 (逗号分隔，命中即时推送并置顶)
+      - WATCHLIST=
+
     volumes:
-      # 可选：将生成的历史表格归档挂载到宿主机
+      # 数据持久化：推送历史库与表格归档挂载到宿主机，容器重建不丢失
       - ./data:/app/data
+
+# ─────────────────────────────────────────────────────────────
+# 方式二 (源码构建)：如果你已把完整项目文件夹上传到 NAS，
+# 可以注释掉上面的 image 行，取消注释下面两行，改为本地构建：
+#
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+# ─────────────────────────────────────────────────────────────

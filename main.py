@@ -5,6 +5,7 @@ FinancePulse - 命令行与 Docker / NAS 无人值守调度引擎
 import sys
 import os
 import time
+import threading
 import argparse
 from datetime import datetime
 
@@ -108,8 +109,10 @@ def run_once():
         mark_watchlist(final_news, watchlist)
         final_news = prioritize_watchlist(final_news)
 
-    # 导出本地归档
-    output_dir = os.path.dirname(__file__)
+    # 导出本地归档 (若存在 data 挂载目录则优先写入，Docker 容器重建不丢失)
+    output_dir = os.path.join(os.path.dirname(__file__), "data")
+    if not os.path.isdir(output_dir):
+        output_dir = os.path.dirname(__file__)
     excel_file = os.path.join(output_dir, "财经热点汇总.csv")
     try:
         export_to_excel(final_news, output_path=excel_file)

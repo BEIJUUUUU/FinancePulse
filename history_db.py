@@ -7,7 +7,9 @@ import sqlite3
 import hashlib
 from datetime import datetime, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "history.db")
+_DB_DIR = os.path.join(os.path.dirname(__file__), "data")
+# 若存在 data 挂载目录 (Docker/NAS 部署)，历史库持久化到该目录，容器重建不丢失
+DB_PATH = os.path.join(_DB_DIR if os.path.isdir(_DB_DIR) else os.path.dirname(__file__), "history.db")
 
 def _conn():
     conn = sqlite3.connect(DB_PATH)

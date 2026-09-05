@@ -19,8 +19,11 @@ WORKDIR /app
 # 仅安装无头调度运行必需的核心轻量依赖 (镜像精简至最小)
 RUN pip install --no-cache-dir requests schedule
 
-# 拷贝核心工程代码
-COPY config.py fetcher.py processor.py llm_analyzer.py email_sender.py main.py settings.example.json ./
+# 拷贝全部核心工程模块 (含历史库与突发监控)
+COPY config.py fetcher.py processor.py llm_analyzer.py email_sender.py main.py history_db.py flash_monitor.py settings.example.json ./
+
+# 创建数据持久化目录 (挂载后历史库与表格归档在容器重建后不丢失)
+RUN mkdir -p /app/data
 
 # 启动默认开启全天候定时轮询服务
 CMD ["python", "main.py", "--cron"]
