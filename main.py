@@ -51,7 +51,8 @@ def run_once():
             model=model,
             system_prompt=cfg.get("custom_prompt", ""),
             reasoning_level=cfg.get("llm_reasoning_level", "balanced"),
-            max_analyze=12
+            max_analyze=12,
+            max_concurrent=int(cfg.get("llm_max_concurrent", 1))
         )
 
     # 导出本地归档

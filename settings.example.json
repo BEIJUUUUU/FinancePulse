@@ -10,6 +10,13 @@
         "wscn"
     ],
     "enable_dedup": true,
+    "categories": [
+        "宏观政策",
+        "A股市场",
+        "科技产业",
+        "大宗商品",
+        "全球要闻"
+    ],
     "schedule_enabled": false,
     "schedule_mode": "classic",
     "schedule_times": [
@@ -24,5 +31,8 @@
     "llm_api_key": "",
     "llm_base_url": "https://api.deepseek.com",
     "llm_model": "deepseek-chat",
+    "llm_reasoning_level": "balanced",
+    "llm_max_concurrent": 1,
+    "custom_prompt": "",
     "ui_theme": "System"
 }

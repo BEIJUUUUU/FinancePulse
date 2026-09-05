@@ -447,6 +447,23 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.combo_depth.pack(side="left", padx=10)
 
+        r_conc = ctk.CTkFrame(c2, fg_color="transparent")
+        r_conc.pack(fill="x", padx=20, pady=4)
+        ctk.CTkLabel(r_conc, text="请求并发模式:", width=140, anchor="w", font=self.f_body).pack(side="left")
+        self.combo_concurrency = ctk.CTkComboBox(
+            r_conc,
+            values=["串行保守 (推荐 · 兼容所有服务商)", "2 路并发 (需服务商支持)", "3 路并发 (仅限高额度账户)"],
+            width=280,
+            corner_radius=8
+        )
+        self.combo_concurrency.pack(side="left", padx=10)
+        ctk.CTkLabel(
+            r_conc,
+            text="遇限流自动退避重试",
+            font=self.f_small,
+            text_color=APPLE_PURPLE
+        ).pack(side="left", padx=6)
+
         r6 = ctk.CTkFrame(c2, fg_color="transparent")
         r6.pack(fill="x", padx=20, pady=4)
         ctk.CTkLabel(r6, text="API Key 秘钥:", width=140, anchor="w", font=self.f_body).pack(side="left")
@@ -699,6 +716,14 @@ class AppleStyleFinanceApp(ctk.CTk):
             return "deep"
         return "balanced"
 
+    def _get_max_concurrent(self) -> int:
+        val = self.combo_concurrency.get()
+        if "2 路" in val:
+            return 2
+        elif "3 路" in val:
+            return 3
+        return 1
+
     def _test_ai_connection(self):
         api_key = self.ent_ai_key.get().strip()
         base_url = self.ent_ai_url.get().strip()
@@ -724,6 +749,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                     model=model,
                     system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                     reasoning_level=self._get_reasoning_level(),
+                    max_concurrent=self._get_max_concurrent(),
                     max_analyze=1
                 )
                 duration = round(time.time() - start_t, 2)
@@ -792,6 +818,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                     model=model,
                     system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                     reasoning_level=self._get_reasoning_level(),
+                    max_concurrent=self._get_max_concurrent(),
                     max_analyze=1
                 )
                 duration = round(time.time() - start_t, 2)
@@ -962,6 +989,14 @@ class AppleStyleFinanceApp(ctk.CTk):
         else:
             self.combo_depth.set("深度研判 (Balanced · 推荐)")
 
+        conc = int(self.cfg.get("llm_max_concurrent", 1))
+        if conc >= 3:
+            self.combo_concurrency.set("3 路并发 (仅限高额度账户)")
+        elif conc == 2:
+            self.combo_concurrency.set("2 路并发 (需服务商支持)")
+        else:
+            self.combo_concurrency.set("串行保守 (推荐 · 兼容所有服务商)")
+
         self.ent_ai_key.insert(0, self.cfg.get("llm_api_key", ""))
         self.ent_ai_url.insert(0, self.cfg.get("llm_base_url", "https://api.deepseek.com"))
         self.combo_ai_model.set(self.cfg.get("llm_model", "deepseek-v4-flash"))
@@ -1020,6 +1055,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.cfg["llm_base_url"] = self.ent_ai_url.get().strip()
         self.cfg["llm_model"] = self.combo_ai_model.get().strip()
         self.cfg["llm_reasoning_level"] = self._get_reasoning_level()
+        self.cfg["llm_max_concurrent"] = self._get_max_concurrent()
         self.cfg["custom_prompt"] = self.txt_prompt.get("1.0", "end").strip()
         self.cfg["schedule_mode"] = self.sched_mode_var.get()
         self.cfg["custom_times"] = self.ent_custom_times.get().strip()
@@ -1058,6 +1094,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                         model=self.combo_ai_model.get().strip(),
                         system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                         reasoning_level=self._get_reasoning_level(),
+                        max_concurrent=self._get_max_concurrent(),
                         max_analyze=12
                     )
                     self.current_news_list = analyzed
@@ -1098,6 +1135,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                     model=model,
                     system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                     reasoning_level=self._get_reasoning_level(),
+                    max_concurrent=self._get_max_concurrent(),
                     max_analyze=12
                 )
                 self.current_news_list = analyzed
@@ -1265,6 +1303,7 @@ class AppleStyleFinanceApp(ctk.CTk):
                         model=self.combo_ai_model.get().strip(),
                         system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                         reasoning_level=self._get_reasoning_level(),
+                        max_concurrent=self._get_max_concurrent(),
                         max_analyze=12
                     )
                     self.current_news_list = data

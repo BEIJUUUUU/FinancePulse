@@ -4,6 +4,7 @@
 支持动态自定义 Prompt、自动获取可用模型列表、行业利好/利空细分与影响程度分级
 """
 import json
+import time
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -120,30 +121,62 @@ def fetch_available_models(base_url: str, api_key: str = "") -> list[str]:
 
     return []
 
-def _call_chat(endpoint: str, api_key: str, payload: dict, timeout: int = 60) -> list[dict]:
-    """底层单次大模型调用，返回解析后的 JSON 数组"""
+def _call_chat(endpoint: str, api_key: str, payload: dict, timeout: int = 90, max_retries: int = 2) -> list[dict]:
+    """
+    底层单次大模型调用，返回解析后的 JSON 数组
+    内置 429 限流 / 5xx 服务端错误的自动退避重试 (兼容 Kimi、智谱、通义等严格限流服务商)
+    """
     data_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint,
-        data=data_bytes,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        }
-    )
 
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        res_body = response.read().decode("utf-8")
-        res_json = json.loads(res_body)
-        raw_reply = res_json["choices"][0]["message"]["content"].strip()
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            req = urllib.request.Request(
+                endpoint,
+                data=data_bytes,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                res_body = response.read().decode("utf-8")
+                res_json = json.loads(res_body)
+                raw_reply = res_json["choices"][0]["message"]["content"].strip()
 
-        if "```json" in raw_reply:
-            raw_reply = raw_reply.split("```json")[1].split("```")[0]
-        elif "```" in raw_reply:
-            raw_reply = raw_reply.split("```")[1].split("```")[0]
+                if "```json" in raw_reply:
+                    raw_reply = raw_reply.split("```json")[1].split("```")[0]
+                elif "```" in raw_reply:
+                    raw_reply = raw_reply.split("```")[1].split("```")[0]
 
-        parsed = json.loads(raw_reply.strip())
-        return parsed if isinstance(parsed, list) else []
+                parsed = json.loads(raw_reply.strip())
+                return parsed if isinstance(parsed, list) else []
+
+        except urllib.error.HTTPError as e:
+            err_detail = ""
+            try:
+                err_detail = e.read().decode("utf-8")
+            except Exception:
+                pass
+            last_err = f"HTTP {e.code} {e.reason} {err_detail[:150]}"
+
+            # 429 限流 / 5xx 服务端过载：退避后重试 (串行重试天然规避并发压制)
+            if e.code in (429, 500, 502, 503, 504) and attempt < max_retries:
+                wait = 3 * (attempt + 1)
+                print(f"[LLM 限流保护] 服务端返回 {e.code}，{wait}s 后自动重试 (第 {attempt + 1}/{max_retries} 次)...")
+                time.sleep(wait)
+                continue
+            raise urllib.error.HTTPError(e.url, e.code, f"{e.reason} | {err_detail[:150]}", e.headers, None)
+
+        except Exception as e:
+            last_err = str(e)
+            # 网络抖动也退避重试一次
+            if attempt < max_retries:
+                time.sleep(2)
+                continue
+            raise
+
+    raise RuntimeError(f"LLM 调用最终失败: {last_err}")
 
 def _analyze_chunk(
     chunk: list[dict],
@@ -196,12 +229,16 @@ def analyze_news_with_llm(
     system_prompt: str = "",
     reasoning_level: str = "balanced",
     max_analyze: int = 12,
-    chunk_size: int = 4
+    chunk_size: int = 4,
+    max_concurrent: int = 1
 ) -> list[dict]:
     """
     调用大模型对财经资讯进行深度结构化分析与行业利好利空研判
-    采用分片并发策略：每片仅含 chunk_size 条，多片同时请求，
-    既保证单条分析细节与诊断模式同级，又维持整体响应速度不变。
+    分片策略：每片仅含 chunk_size 条，确保单条分析细节与诊断模式同级。
+    并发策略 (保守设计，兼容所有服务商)：
+    - max_concurrent = 1 (默认): 串行逐片请求，100% 兼容 Kimi/智谱/通义/Ollama 等严格限流服务商
+    - max_concurrent = 2~3: 多路并发，仅建议确认服务商支持并行调用时开启
+    遇到 429 限流或 5xx 时自动退避重试，单分片失败自动降级为原始资讯，绝不中断整体流程。
     """
     if not news_list:
         return []
@@ -226,22 +263,33 @@ def analyze_news_with_llm(
     target_news = list(news_list)[:max_analyze]
     chunks = [target_news[i:i + chunk_size] for i in range(0, len(target_news), chunk_size)]
 
-    # 分片并发研判 (多路同时请求，总耗时 ≈ 单片耗时；实测 3 路并发为吞吐最优解)
+    def _run_chunk(ci: int, chunk: list[dict]):
+        try:
+            return _analyze_chunk(chunk, endpoint, api_key, model, full_prompt, prompt_config["temperature"])
+        except Exception as e:
+            print(f"[LLM 分片异常] {e}，该片降级为原始资讯。")
+            return list(chunk)
+
+    # 并发策略：默认串行逐片 (最保守，兼容一切服务商与本地 Ollama)
     results_by_index = {}
-    with ThreadPoolExecutor(max_workers=min(3, len(chunks))) as executor:
-        future_to_idx = {
-            executor.submit(
-                _analyze_chunk, chunk, endpoint, api_key, model,
-                full_prompt, prompt_config["temperature"]
-            ): ci for ci, chunk in enumerate(chunks)
-        }
-        for future in as_completed(future_to_idx):
-            ci = future_to_idx[future]
-            try:
-                results_by_index[ci] = future.result()
-            except Exception as e:
-                print(f"[LLM 并发异常] {e}")
-                results_by_index[ci] = chunks[ci]
+    if max_concurrent <= 1 or len(chunks) <= 1:
+        for ci, chunk in enumerate(chunks):
+            print(f"[LLM 研判进度] 分片 {ci + 1}/{len(chunks)} ({len(chunk)} 条)...")
+            results_by_index[ci] = _run_chunk(ci, chunk)
+    else:
+        workers = min(max_concurrent, len(chunks))
+        print(f"[LLM 研判进度] 已启用 {workers} 路并发 (共 {len(chunks)} 片)...")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_idx = {
+                executor.submit(_run_chunk, ci, chunk): ci for ci, chunk in enumerate(chunks)
+            }
+            for future in as_completed(future_to_idx):
+                ci = future_to_idx[future]
+                try:
+                    results_by_index[ci] = future.result()
+                except Exception as e:
+                    print(f"[LLM 并发异常] {e}")
+                    results_by_index[ci] = chunks[ci]
 
     # 按原始顺序拼接，超出分析上限的直接保留原始资讯
     final = []
@@ -251,5 +299,6 @@ def analyze_news_with_llm(
         final.extend(news_list[max_analyze:])
 
     ok_count = sum(1 for x in final if isinstance(x, dict) and x.get("ai_comment"))
-    print(f"[LLM] 大模型分片并发研判完成 ({model})，{len(chunks)} 路并发，成功生成 {ok_count} 条深度行业分析。")
+    mode_desc = f"{max_concurrent} 路并发" if max_concurrent > 1 else "串行保守"
+    print(f"[LLM] 大模型分片研判完成 ({model}, {mode_desc})，成功生成 {ok_count} 条深度行业分析。")
     return final

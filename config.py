@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "llm_base_url": "https://api.deepseek.com",
     "llm_model": "deepseek-v4-flash",
     "llm_reasoning_level": "balanced",
+    "llm_max_concurrent": 1,
     "custom_prompt": "",
     "ui_theme": "System"
 }
@@ -59,6 +60,11 @@ def load_config() -> dict:
         cfg["llm_model"] = os.getenv("LLM_MODEL").strip()
     if os.getenv("LLM_REASONING_LEVEL"):
         cfg["llm_reasoning_level"] = os.getenv("LLM_REASONING_LEVEL").strip()
+    if os.getenv("LLM_MAX_CONCURRENT"):
+        try:
+            cfg["llm_max_concurrent"] = max(1, min(3, int(os.getenv("LLM_MAX_CONCURRENT"))))
+        except ValueError:
+            pass
     if os.getenv("NEWS_LIMIT"):
         try:
             cfg["news_limit"] = int(os.getenv("NEWS_LIMIT"))
@@ -104,5 +110,6 @@ LLM_API_KEY = _active_cfg.get("llm_api_key", "")
 LLM_BASE_URL = _active_cfg.get("llm_base_url", "https://api.deepseek.com")
 LLM_MODEL = _active_cfg.get("llm_model", "deepseek-v4-flash")
 LLM_REASONING_LEVEL = _active_cfg.get("llm_reasoning_level", "balanced")
+LLM_MAX_CONCURRENT = max(1, min(3, int(_active_cfg.get("llm_max_concurrent", 1))))
 CUSTOM_PROMPT = _active_cfg.get("custom_prompt", "")
 UI_THEME = _active_cfg.get("ui_theme", "System")
