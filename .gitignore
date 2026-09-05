@@ -1,0 +1,24 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# 个人敏感配置文件 (保护授权码不被公开泄露)
+settings.json
+
+# 本地数据与表格归档
+*.csv
+*.xlsx
+*.log
+
+# 编辑器配置
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,28 @@
+{
+    "smtp_server": "smtp.qq.com",
+    "smtp_port": 465,
+    "sender_email": "",
+    "sender_auth_code": "",
+    "receiver_email": "",
+    "news_limit": 20,
+    "sources": [
+        "sina",
+        "wscn"
+    ],
+    "enable_dedup": true,
+    "schedule_enabled": false,
+    "schedule_mode": "classic",
+    "schedule_times": [
+        "08:30",
+        "12:00",
+        "16:00"
+    ],
+    "custom_times": "09:15, 14:30, 21:00",
+    "filter_keywords": "",
+    "llm_provider": "DeepSeek (深度求索)",
+    "llm_enabled": false,
+    "llm_api_key": "",
+    "llm_base_url": "https://api.deepseek.com",
+    "llm_model": "deepseek-chat",
+    "ui_theme": "System"
+}
