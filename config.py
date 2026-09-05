@@ -5,7 +5,15 @@
 import os
 import json
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+# Docker/NAS 部署时存在 data 挂载目录，settings.json 持久化到该目录，容器重建不丢失
+CONFIG_FILE = os.path.join(_DATA_DIR if os.path.isdir(_DATA_DIR) else os.path.dirname(__file__), "settings.json")
+
+# compose 模板中的占位符值不生效，避免覆盖 WebUI 中保存的真实配置
+_PLACEHOLDERS = {"", "your_qq@qq.com", "your_16_char_smtp_code", "sk-xxxxxxxxxxxxxxxx"}
+
+def _env_ok(val: str) -> bool:
+    return val is not None and val.strip() != "" and val.strip() not in _PLACEHOLDERS
 
 DEFAULT_CONFIG = {
     "smtp_server": "smtp.qq.com",
@@ -48,17 +56,17 @@ def load_config() -> dict:
         except Exception as e:
             print(f"[配置] 读取 settings.json 失败: {e}")
 
-    # 环境变量覆盖 (Docker / NAS 容器化支持)
-    if os.getenv("SENDER_EMAIL"):
+    # 环境变量覆盖 (Docker / NAS 容器化支持，占位符值自动忽略)
+    if _env_ok(os.getenv("SENDER_EMAIL")):
         cfg["sender_email"] = os.getenv("SENDER_EMAIL").strip()
-    if os.getenv("SENDER_AUTH_CODE"):
+    if _env_ok(os.getenv("SENDER_AUTH_CODE")):
         cfg["sender_auth_code"] = os.getenv("SENDER_AUTH_CODE").strip()
-    if os.getenv("RECEIVER_EMAIL"):
+    if _env_ok(os.getenv("RECEIVER_EMAIL")):
         cfg["receiver_email"] = os.getenv("RECEIVER_EMAIL").strip()
-    if os.getenv("LLM_API_KEY"):
+    if _env_ok(os.getenv("LLM_API_KEY")):
         cfg["llm_api_key"] = os.getenv("LLM_API_KEY").strip()
         cfg["llm_enabled"] = True
-    if os.getenv("LLM_BASE_URL"):
+    if _env_ok(os.getenv("LLM_BASE_URL")):
         cfg["llm_base_url"] = os.getenv("LLM_BASE_URL").strip()
     if os.getenv("LLM_MODEL"):
         cfg["llm_model"] = os.getenv("LLM_MODEL").strip()

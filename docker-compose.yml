@@ -9,37 +9,31 @@ services:
       # 时区配置 (强制东八区上海时间)
       - TZ=Asia/Shanghai
 
-      # 邮箱推送配置 (填写你的 QQ 邮箱与 16 位 SMTP 授权码)
-      - SENDER_EMAIL=your_qq@qq.com
-      - SENDER_AUTH_CODE=your_16_char_smtp_code
-      # 接收邮箱支持逗号分隔多邮箱群发，留空默认发给自己
-      - RECEIVER_EMAIL=your_qq@qq.com
-
+      # 推荐直接在 WebUI 控制台 (http://NAS_IP:6888) 中配置邮箱、AI 等全部参数，
+      # 保存后自动持久化，无需在此填写。以下环境变量保持注释即可。
+      # 如偏好环境变量方式，取消注释并填写真实值 (占位符不会生效)：
+      #
+      # 邮箱推送配置 (QQ 邮箱 + 16 位 SMTP 授权码，接收邮箱支持逗号分隔多邮箱群发)
+      # - SENDER_EMAIL=your_qq@qq.com
+      # - SENDER_AUTH_CODE=your_16_char_smtp_code
+      # - RECEIVER_EMAIL=your_qq@qq.com
+      #
       # 大模型 AI 配置 (支持 DeepSeek / Kimi / 智谱 / 通义千问 等)
-      - LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
-      - LLM_BASE_URL=https://api.deepseek.com
-      - LLM_MODEL=deepseek-v4-flash
-      - LLM_REASONING_LEVEL=balanced
-      - LLM_MAX_CONCURRENT=1
-
-      # 抓取与定时配置
-      - NEWS_LIMIT=20
-      - CRON_TIMES=08:30,12:00,16:00
-      - SOURCES=sina,wscn
-      - CATEGORIES=宏观政策,A股市场,科技产业,大宗商品,全球要闻
-      - ENABLE_DEDUP=true
-
-      # 突发要闻实时监控 (命中关键词秒级推送)
-      - FLASH_ENABLED=1
-      - FLASH_INTERVAL=2
-      - FLASH_KEYWORDS=降息,降准,加息,证监会,暴涨,暴跌,熔断,停火
-
-      # 自选股/关键词监控 (逗号分隔，命中即时推送并置顶)
-      - WATCHLIST=
+      # - LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
+      # - LLM_BASE_URL=https://api.deepseek.com
+      # - LLM_MODEL=deepseek-v4-flash
+      # - LLM_REASONING_LEVEL=balanced
+      # - LLM_MAX_CONCURRENT=1
+      #
+      # WebUI 访问令牌 (可选，设置后打开控制台需输入)
+      # - WEBUI_PASSWORD=your_access_token
 
     volumes:
-      # 数据持久化：推送历史库与表格归档挂载到宿主机，容器重建不丢失
+      # 数据持久化：推送历史库、配置与表格归档挂载到宿主机，容器重建不丢失
       - ./data:/app/data
+    ports:
+      # WebUI 可视化控制台 (浏览器访问 http://NAS_IP:6888)
+      - "6888:6888"
 
 # ─────────────────────────────────────────────────────────────
 # 方式二 (源码构建)：如果你已把完整项目文件夹上传到 NAS，

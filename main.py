@@ -11,6 +11,7 @@ from datetime import datetime
 
 import config
 import history_db
+import runtime
 import flash_monitor
 from fetcher import fetch_cls_news
 from processor import filter_and_clean_news, mark_watchlist, prioritize_watchlist, build_markdown_table, build_html_card, export_to_excel
@@ -20,6 +21,7 @@ from llm_analyzer import analyze_news_with_llm
 def _flash_push(hits):
     """突发要闻即时推送回调 (秒级时效，不经 AI 分析)"""
     try:
+        runtime.set_news(hits)
         cfg = config.load_config()
         sender = cfg.get("sender_email")
         auth = cfg.get("sender_auth_code")
@@ -53,6 +55,14 @@ def _flash_push(hits):
 
 def run_once():
     """执行一次完整的财经快讯获取、去重、AI分析与微信邮件推送任务"""
+    runtime.state["running"] = True
+    try:
+        _run_once_inner()
+    finally:
+        runtime.state["running"] = False
+        runtime.state["last_run"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def _run_once_inner():
     cfg = config.load_config()
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n[{now_str}] 正在抓取最新财经快讯...")
@@ -125,6 +135,9 @@ def run_once():
     print(build_markdown_table(final_news))
     print("---------------------------\n")
 
+    # 缓存到运行时供 WebUI 展示
+    runtime.set_news(final_news)
+
     # 邮件与微信推送
     sender = cfg.get("sender_email")
     auth = cfg.get("sender_auth_code")
@@ -146,6 +159,7 @@ def run_once():
         )
         if ok:
             history_db.record_pushed(final_news)
+            runtime.state["last_result"] = "推送成功"
     else:
         print("[提示] 未配置发件邮箱或授权码，跳过邮件发送。")
 
@@ -164,6 +178,10 @@ def main():
     if run_cron:
         try:
             import schedule
+
+            # stdout 双写捕获 (WebUI 实时日志)
+            sys.stdout = runtime.Tee(sys.stdout)
+
             times = cfg.get("schedule_times", ["08:30", "12:00", "16:00"])
             print("======================================================")
             print(" FinancePulse 后台定时服务已启动")
@@ -171,6 +189,17 @@ def main():
             print(f" 定时推送时段: {', '.join(times)}")
             print(f" 目标接收邮箱: {cfg.get('receiver_email') or cfg.get('sender_email')}")
             print("======================================================")
+
+            # WebUI 可视化控制台 (浏览器访问 http://NAS_IP:6888)
+            try:
+                import webui
+                webui_port = int(os.getenv("WEBUI_PORT", "6888"))
+                threading.Thread(target=webui.start_webui, kwargs={"port": webui_port}, daemon=True, name="WebUI").start()
+                print(f"[WebUI] 控制台已启动: http://0.0.0.0:{webui_port}")
+            except ImportError:
+                print("[WebUI] 未安装 flask，控制台不可用 (pip install flask)")
+            except Exception as e:
+                print(f"[WebUI] 启动失败: {e}")
 
             # 突发要闻实时监控 (默认在常驻模式下自动开启)
             if cfg.get("flash_enabled", False):
