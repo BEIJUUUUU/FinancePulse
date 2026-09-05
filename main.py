@@ -1,8 +1,9 @@
 """
-主程序入口：调度资讯抓取、清洗加工成表格并推送到个人邮箱 (附带微信提醒) / 飞书
-支持调用大模型 (DeepSeek / OpenAI) 智能提炼核心事实与情绪点评
+FinancePulse - 命令行与 Docker / NAS 无人值守调度引擎
 """
 import sys
+import os
+import time
 import argparse
 from datetime import datetime
 
@@ -13,89 +14,119 @@ from email_sender import send_email_digest
 from llm_analyzer import analyze_news_with_llm
 
 def run_once():
-    """执行一次完整的财经快讯获取、AI分析与邮件推送任务"""
-    now_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now_time_str}] 正在抓取最新财经快讯...")
-    
-    # 1. 抓取快讯
-    sources = getattr(config, "SOURCES", ["sina", "wscn"])
-    limit = getattr(config, "NEWS_LIMIT", 20)
-    raw_news = fetch_cls_news(limit=limit, enabled_sources=sources)
+    """执行一次完整的财经快讯获取、去重、AI分析与微信邮件推送任务"""
+    cfg = config.load_config()
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n[{now_str}] 正在抓取最新财经快讯...")
+
+    sources = cfg.get("sources", ["sina", "wscn"])
+    limit = cfg.get("news_limit", 20)
+    categories = cfg.get("categories", ["宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"])
+    dedup = cfg.get("enable_dedup", True)
+
+    raw_news = fetch_cls_news(limit=limit * 2, enabled_sources=sources)
     if not raw_news:
-        print("[提示] 本次未获取到最新资讯，流程结束。")
+        print("[提示] 本次未获取到资讯，流程结束。")
         return
 
-    # 2. 清洗去重
-    dedup = getattr(config, "ENABLE_DEDUP", True)
-    cleaned_news = filter_and_clean_news(raw_news, keywords=config.FILTER_KEYWORDS, dedup_threshold=0.48 if dedup else 0.99, max_limit=limit)
-    print(f"[处理] 抓取原始资讯 {len(raw_news)} 条，去重后有效保留 {len(cleaned_news)} 条。")
+    # 领域过滤与去重
+    cleaned_news = filter_and_clean_news(
+        raw_news,
+        keywords=cfg.get("filter_keywords", []),
+        allowed_categories=categories,
+        dedup_threshold=0.48 if dedup else 0.99,
+        max_limit=limit
+    )
+    print(f"[处理] 抓取原始数据 {len(raw_news)} 条，经领域过滤与去重后保留 {len(cleaned_news)} 条。")
 
-    # 3. 若启用了大模型，自动调用 AI 进行研报提炼与情绪标注
+    # 大模型行业分析
     final_news = cleaned_news
-    if config.LLM_ENABLED and config.LLM_API_KEY:
-        print(f"[AI 分析] 正在调用大模型 ({config.LLM_MODEL}) 进行深度提炼与点评...")
+    if cfg.get("llm_enabled") and cfg.get("llm_api_key"):
+        model = cfg.get("llm_model", "deepseek-v4-flash")
+        print(f"[AI 分析] 正在调用大模型 ({model}) 进行行业影响分析与情绪分级...")
         final_news = analyze_news_with_llm(
             cleaned_news,
-            api_key=config.LLM_API_KEY,
-            base_url=config.LLM_BASE_URL,
-            model=config.LLM_MODEL,
-            system_prompt=getattr(config, "CUSTOM_PROMPT", ""),
-            reasoning_level=getattr(config, "LLM_REASONING_LEVEL", "balanced")
+            api_key=cfg.get("llm_api_key"),
+            base_url=cfg.get("llm_base_url", "https://api.deepseek.com"),
+            model=model,
+            system_prompt=cfg.get("custom_prompt", ""),
+            reasoning_level=cfg.get("llm_reasoning_level", "balanced"),
+            max_analyze=12
         )
 
-    # 4. 组织表格并导出本地备份
-    excel_file = "D:/Desktop/finance-news-bot/财经热点汇总.csv"
+    # 导出本地归档
+    output_dir = os.path.dirname(__file__)
+    excel_file = os.path.join(output_dir, "财经热点汇总.csv")
     try:
         export_to_excel(final_news, output_path=excel_file)
         print(f"[导出] 表格已同步导出至本地备份: {excel_file}")
     except Exception as e:
-        print(f"[导出异常] 写入本地表格失败: {e}")
+        print(f"[导出提示] 写入本地表格异常: {e}")
 
-    # 5. 控制台预览文本表格
-    markdown_table = build_markdown_table(final_news)
+    # 控制台摘要预览
     print("\n--- [资讯研报表格预览] ---")
-    print(markdown_table)
+    print(build_markdown_table(final_news))
     print("---------------------------\n")
 
-    # 6. 推送到邮箱 (支持直接在微信通过 QQ邮箱提醒 查看)
-    if config.SENDER_EMAIL and config.SENDER_AUTH_CODE:
-        receiver = config.RECEIVER_EMAIL or config.SENDER_EMAIL
+    # 邮件与微信推送
+    sender = cfg.get("sender_email")
+    auth = cfg.get("sender_auth_code")
+    receiver = cfg.get("receiver_email") or sender
+
+    if sender and auth:
         print(f"[邮件推送] 正在推送到邮箱: {receiver} ...")
         html_card = build_html_card(final_news)
         subject_str = f"财经早报与智能热点精选 ({datetime.now().strftime('%m月%d日 %H:%M')})"
         send_email_digest(
-            smtp_server=config.SMTP_SERVER,
-            smtp_port=config.SMTP_PORT,
-            sender_email=config.SENDER_EMAIL,
-            sender_auth_code=config.SENDER_AUTH_CODE,
+            smtp_server=cfg.get("smtp_server", "smtp.qq.com"),
+            smtp_port=int(cfg.get("smtp_port", 465)),
+            sender_email=sender,
+            sender_auth_code=auth,
             receiver_email=receiver,
             subject=subject_str,
             html_content=html_card,
             attachment_path=excel_file
         )
     else:
-        print("[提示] 尚未配置 SENDER_EMAIL 或 SENDER_AUTH_CODE。")
+        print("[提示] 未配置发件邮箱或授权码，跳过邮件发送。")
 
 def main():
-    parser = argparse.ArgumentParser(description="FinancePulse - 财经早报与微信提醒助手")
-    parser.add_argument("--cron", action="store_true", help="开启定时运行模式 (每天固定时间自动推送)")
+    parser = argparse.ArgumentParser(description="FinancePulse - 财经早报与微信提醒调度引擎")
+    parser.add_argument("--once", action="store_true", help="单次执行抓取与推送后退出")
+    parser.add_argument("--cron", action="store_true", help="开启定时运行模式 (每天固定时点全自动轮询)")
     args = parser.parse_args()
 
-    if args.cron:
+    cfg = config.load_config()
+
+    # 默认模式判断：如果是 Docker 环境且没有指定 --once，自动开启 cron 常驻
+    is_docker = os.path.exists("/.dockerenv") or os.getenv("DOCKER_MODE") == "1"
+    run_cron = args.cron or (is_docker and not args.once)
+
+    if run_cron:
         try:
             import schedule
-            import time
-            print("[模式] 已启动定时推送服务...")
-            times = getattr(config, "_active_cfg", {}).get("schedule_times", ["08:30", "12:00", "16:00"])
+            times = cfg.get("schedule_times", ["08:30", "12:00", "16:00"])
+            print("======================================================")
+            print(f" FinancePulse 后台定时服务已启动")
+            print(f" 当前系统时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f" 定时推送时段: {', '.join(times)}")
+            print(f" 目标接收邮箱: {cfg.get('receiver_email') or cfg.get('sender_email')}")
+            print("======================================================")
+
             for t in times:
                 schedule.every().day.at(t).do(run_once)
 
+            # 服务启动时先立即执行一次首发推送
+            print("[服务启动] 执行首次开机巡检与推送测试...")
             run_once()
+
             while True:
                 schedule.run_pending()
-                time.sleep(30)
+                time.sleep(15)
         except ImportError:
-            print("[错误] 未安装 schedule 依赖，请先运行: pip install schedule")
+            print("[错误] 未安装 schedule 依赖，请运行: pip install schedule")
+        except KeyboardInterrupt:
+            print("\n[退出] 收到退出信号，服务安全关闭。")
     else:
         run_once()
 

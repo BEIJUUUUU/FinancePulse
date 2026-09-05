@@ -87,6 +87,29 @@ pip install -r requirements.txt
   python main.py --cron
   ```
 
+### Docker / NAS 部署 (推荐 7x24 小时无人值守)
+适合部署在群晖 (Synology)、极空间、绿联、威联通、TrueNAS、Unraid 等家用 NAS 或云服务器上，容器内置上海时区环境，全天候全自动执行定时早报推送。
+
+#### 一键 Compose 启动
+1. 下载项目中的 `docker-compose.yml` 与 `Dockerfile`；
+2. 编辑 `docker-compose.yml` 中的环境变量（填入你的 QQ 邮箱、授权码与大模型 API Key）；
+3. 执行启动命令：
+   ```bash
+   docker compose up -d
+   ```
+
+#### 核心环境变量参考
+| 变量名 | 说明 | 示例值 |
+| :--- | :--- | :--- |
+| `TZ` | 容器时区 (强制上海时间) | `Asia/Shanghai` |
+| `SENDER_EMAIL` | 发件人 QQ 邮箱 | `your_qq@qq.com` |
+| `SENDER_AUTH_CODE` | 16 位 SMTP 授权码 | `abcdefghijklmnop` |
+| `RECEIVER_EMAIL` | 接收邮箱 (可与发件人相同) | `your_qq@qq.com` |
+| `LLM_API_KEY` | 大模型 API Key | `sk-xxxxxxxxxxxxxxxx` |
+| `LLM_MODEL` | 模型名称 | `deepseek-v4-flash` |
+| `CRON_TIMES` | 定时推送时间点 (逗号分隔) | `08:30,12:00,16:00` |
+| `CATEGORIES` | 关注领域分类 (过滤噪音) | `宏观政策,A股市场,科技产业,大宗商品,全球要闻` |
+
 ---
 
 ## 微信即时提醒配置指南

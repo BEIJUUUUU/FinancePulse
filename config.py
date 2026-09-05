@@ -1,5 +1,6 @@
 """
 系统配置驱动模块
+支持 settings.json 持久化与 Docker 容器全量环境变量注入
 """
 import os
 import json
@@ -32,16 +33,49 @@ DEFAULT_CONFIG = {
 }
 
 def load_config() -> dict:
-    """加载当前配置"""
-    config = DEFAULT_CONFIG.copy()
+    """加载配置：优先读取 settings.json，并允许 Docker 环境变量覆盖"""
+    cfg = DEFAULT_CONFIG.copy()
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-                config.update(saved)
+                cfg.update(saved)
         except Exception as e:
             print(f"[配置] 读取 settings.json 失败: {e}")
-    return config
+
+    # 环境变量覆盖 (Docker / NAS 容器化支持)
+    if os.getenv("SENDER_EMAIL"):
+        cfg["sender_email"] = os.getenv("SENDER_EMAIL").strip()
+    if os.getenv("SENDER_AUTH_CODE"):
+        cfg["sender_auth_code"] = os.getenv("SENDER_AUTH_CODE").strip()
+    if os.getenv("RECEIVER_EMAIL"):
+        cfg["receiver_email"] = os.getenv("RECEIVER_EMAIL").strip()
+    if os.getenv("LLM_API_KEY"):
+        cfg["llm_api_key"] = os.getenv("LLM_API_KEY").strip()
+        cfg["llm_enabled"] = True
+    if os.getenv("LLM_BASE_URL"):
+        cfg["llm_base_url"] = os.getenv("LLM_BASE_URL").strip()
+    if os.getenv("LLM_MODEL"):
+        cfg["llm_model"] = os.getenv("LLM_MODEL").strip()
+    if os.getenv("LLM_REASONING_LEVEL"):
+        cfg["llm_reasoning_level"] = os.getenv("LLM_REASONING_LEVEL").strip()
+    if os.getenv("NEWS_LIMIT"):
+        try:
+            cfg["news_limit"] = int(os.getenv("NEWS_LIMIT"))
+        except ValueError:
+            pass
+    if os.getenv("CRON_TIMES"):
+        times = [t.strip() for t in os.getenv("CRON_TIMES").split(",") if t.strip()]
+        if times:
+            cfg["schedule_times"] = times
+    if os.getenv("SOURCES"):
+        cfg["sources"] = [s.strip() for s in os.getenv("SOURCES").split(",") if s.strip()]
+    if os.getenv("CATEGORIES"):
+        cfg["categories"] = [c.strip() for c in os.getenv("CATEGORIES").split(",") if c.strip()]
+    if os.getenv("CUSTOM_PROMPT"):
+        cfg["custom_prompt"] = os.getenv("CUSTOM_PROMPT").strip()
+
+    return cfg
 
 def save_config(config_dict: dict) -> bool:
     """保存配置到 settings.json"""
@@ -55,11 +89,11 @@ def save_config(config_dict: dict) -> bool:
 
 # 导出变量
 _active_cfg = load_config()
-SMTP_SERVER = _active_cfg["smtp_server"]
-SMTP_PORT = _active_cfg["smtp_port"]
-SENDER_EMAIL = _active_cfg["sender_email"]
-SENDER_AUTH_CODE = _active_cfg["sender_auth_code"]
-RECEIVER_EMAIL = _active_cfg["receiver_email"]
+SMTP_SERVER = _active_cfg.get("smtp_server", "smtp.qq.com")
+SMTP_PORT = int(_active_cfg.get("smtp_port", 465))
+SENDER_EMAIL = _active_cfg.get("sender_email", "")
+SENDER_AUTH_CODE = _active_cfg.get("sender_auth_code", "")
+RECEIVER_EMAIL = _active_cfg.get("receiver_email", "") or SENDER_EMAIL
 NEWS_LIMIT = _active_cfg.get("news_limit", 20)
 SOURCES = _active_cfg.get("sources", ["sina", "wscn"])
 ENABLE_DEDUP = _active_cfg.get("enable_dedup", True)

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  finance-pulse:
+    image: beiju/finance-pulse:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finance-pulse
+    restart: unless-stopped
+    environment:
+      # 时区配置 (强制东八区上海时间)
+      - TZ=Asia/Shanghai
+
+      # 邮箱推送配置 (填写你的 QQ 邮箱与 16 位 SMTP 授权码)
+      - SENDER_EMAIL=your_qq@qq.com
+      - SENDER_AUTH_CODE=your_16_char_smtp_code
+      - RECEIVER_EMAIL=your_qq@qq.com
+
+      # 大模型 AI 配置 (支持 DeepSeek / Kimi / 智谱 / 通义千问 等)
+      - LLM_API_KEY=sk-xxxxxxxxxxxxxxxx
+      - LLM_BASE_URL=https://api.deepseek.com
+      - LLM_MODEL=deepseek-v4-flash
+      - LLM_REASONING_LEVEL=balanced
+
+      # 抓取与定时配置
+      - NEWS_LIMIT=20
+      - CRON_TIMES=08:30,12:00,16:00
+      - SOURCES=sina,wscn
+      - CATEGORIES=宏观政策,A股市场,科技产业,大宗商品,全球要闻
+      - ENABLE_DEDUP=true
+
+    volumes:
+      # 可选：将生成的历史表格归档挂载到宿主机
+      - ./data:/app/data
