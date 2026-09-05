@@ -1,6 +1,6 @@
 """
 FinancePulse - 现代化桌面智能研报与微信推送助手 (Apple 极简风格版)
-遵循 Apple HIG 现代设计规范：大圆角、纯净层级底色、单层原生导航与多信源智能去重
+支持自定义大模型 System Prompt 提示词与一键 AI 连通性测试诊断
 """
 import os
 import sys
@@ -14,9 +14,9 @@ import config
 from fetcher import fetch_cls_news
 from processor import filter_and_clean_news, build_html_card, export_to_excel
 from email_sender import send_email_digest
-from llm_analyzer import analyze_news_with_llm, LLM_PROVIDERS
+from llm_analyzer import analyze_news_with_llm, LLM_PROVIDERS, DEFAULT_SYSTEM_PROMPT
 
-# ==================== Apple 风格配色设计系统 ====================
+# Apple 设计规范调色板
 APPLE_BLUE = "#007AFF"
 APPLE_BLUE_HOVER = "#0062CC"
 APPLE_GREEN = "#34C759"
@@ -35,7 +35,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.title("FinancePulse")
-        self.geometry("1140x790")
+        self.geometry("1140x800")
         self.minsize(980, 680)
 
         # 状态变量
@@ -47,19 +47,17 @@ class AppleStyleFinanceApp(ctk.CTk):
         self._build_apple_ui()
         self._load_config_to_ui()
         self._switch_page("dash")
-        self.log("✨ 欢迎使用 FinancePulse！已启用 Apple 极简现代设计系统。")
+        self.log("✨ 系统已就绪。已加载多源实时快讯聚合引擎与 AI 研报分析模块。")
 
     def _build_apple_ui(self):
-        # 整体网格布局：左侧栏 (col 0)，右侧主容器 (col 1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ==================== 1. macOS 风格侧边栏 (Sidebar) ====================
+        # ==================== 1. macOS 风格侧边栏 ====================
         self.sidebar = ctk.CTkFrame(self, width=230, corner_radius=0, fg_color=("gray92", "#18181b"))
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(10, weight=1)
 
-        # 品牌 Header
         self.brand_title = ctk.CTkLabel(
             self.sidebar,
             text="📈 FinancePulse",
@@ -75,9 +73,8 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.brand_sub.grid(row=1, column=0, padx=22, pady=(0, 24), sticky="w")
 
-        # 导航按键 (使用动态高亮追踪)
         self.nav_buttons = {}
-        
+
         self.btn_nav_dash = ctk.CTkButton(
             self.sidebar,
             text="  📰  实时快讯大厅",
@@ -114,16 +111,15 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.btn_nav_guide.grid(row=4, column=0, padx=14, pady=5, sticky="ew")
         self.nav_buttons["guide"] = self.btn_nav_guide
 
-        # 定时推送圆角卡片
+        # 定时卡片
         self.sched_card = ctk.CTkFrame(self.sidebar, corner_radius=14, fg_color=("gray85", "#27272a"))
         self.sched_card.grid(row=5, column=0, padx=14, pady=(24, 10), sticky="ew")
 
-        self.sched_title = ctk.CTkLabel(
+        ctk.CTkLabel(
             self.sched_card,
             text="⏰ 后台定时推送",
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold")
-        )
-        self.sched_title.pack(anchor="w", padx=14, pady=(12, 2))
+        ).pack(anchor="w", padx=14, pady=(12, 2))
 
         self.sched_status_lbl = ctk.CTkLabel(
             self.sched_card,
@@ -145,14 +141,13 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.btn_sched_toggle.pack(fill="x", padx=12, pady=(0, 12))
 
-        # 主题偏好切换
-        self.theme_lbl = ctk.CTkLabel(
+        # 外观切换
+        ctk.CTkLabel(
             self.sidebar,
             text="外观模式:",
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=11),
             text_color="gray"
-        )
-        self.theme_lbl.grid(row=11, column=0, padx=20, pady=(0, 2), sticky="w")
+        ).grid(row=11, column=0, padx=20, pady=(0, 2), sticky="w")
 
         self.theme_opt = ctk.CTkOptionMenu(
             self.sidebar,
@@ -164,30 +159,25 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.theme_opt.grid(row=12, column=0, padx=16, pady=(0, 20), sticky="ew")
         self.theme_opt.set(self.cfg.get("ui_theme", "System"))
 
-        # ==================== 2. 右侧单层主容器 (Page Container) ====================
+        # ==================== 2. 右侧单层主容器 ====================
         self.content_container = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.content_container.grid(row=0, column=1, sticky="nsew", padx=20, pady=16)
         self.content_container.grid_rowconfigure(0, weight=1)
         self.content_container.grid_columnconfigure(0, weight=1)
 
-        # 3 个独立无干扰视图页面
         self.pages = {}
         self.pages["dash"] = self._create_dash_page()
         self.pages["settings"] = self._create_settings_page()
         self.pages["guide"] = self._create_guide_page()
 
     def _switch_page(self, page_name: str):
-        """单层平滑切换视图并更新侧边栏高亮选中状态"""
         self.current_page = page_name
-
-        # 1. 隐藏所有页面，显示目标页面
         for name, page in self.pages.items():
             if name == page_name:
                 page.pack(fill="both", expand=True)
             else:
                 page.pack_forget()
 
-        # 2. 更新左侧导航选中样式 (选中的高亮为 Apple Blue，其他透明)
         for name, btn in self.nav_buttons.items():
             if name == page_name:
                 btn.configure(
@@ -203,16 +193,14 @@ class AppleStyleFinanceApp(ctk.CTk):
                 )
 
     # -------------------------------------------------------------
-    # 页面 1：实时快讯大厅 (Apple 风格卡片资讯流)
+    # 页面 1：实时快讯大厅
     # -------------------------------------------------------------
     def _create_dash_page(self):
         page = ctk.CTkFrame(self.content_container, corner_radius=16, fg_color="transparent")
 
-        # 顶部工具操作条 (Apple 极简大圆角卡片)
         toolbar = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#27272a"), border_width=1, border_color=("gray85", "gray30"))
         toolbar.pack(fill="x", pady=(0, 14))
 
-        # 抓取条数选择
         ctk.CTkLabel(toolbar, text="抓取数量:", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)).pack(side="left", padx=(16, 4), pady=12)
         self.combo_count = ctk.CTkComboBox(
             toolbar,
@@ -224,7 +212,6 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.combo_count.pack(side="left", padx=(0, 10), pady=12)
         self.combo_count.set(str(self.cfg.get("news_limit", 20)))
 
-        # 操作按钮组
         self.btn_fetch = ctk.CTkButton(
             toolbar,
             text="🔄 抓取最新快讯",
@@ -274,7 +261,6 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.btn_push.pack(side="right", padx=16, pady=12)
 
-        # 资讯卡片流动展示容器 (带柔和边框)
         self.cards_scroll = ctk.CTkScrollableFrame(
             page,
             corner_radius=16,
@@ -285,7 +271,6 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.cards_scroll.pack(fill="both", expand=True, pady=(0, 10))
 
-        # 底部状态日志卡片
         log_card = ctk.CTkFrame(page, height=72, corner_radius=14, fg_color=("white", "#27272a"), border_width=1, border_color=("gray85", "gray30"))
         log_card.pack(fill="x")
 
@@ -295,12 +280,12 @@ class AppleStyleFinanceApp(ctk.CTk):
         return page
 
     # -------------------------------------------------------------
-    # 页面 2：系统与 AI 配置 (Apple 设置项分组卡片风格)
+    # 页面 2：系统设置 (新增 Prompt 自定义编辑器与一键连通性测试)
     # -------------------------------------------------------------
     def _create_settings_page(self):
         page = ctk.CTkScrollableFrame(self.content_container, corner_radius=16, fg_color="transparent")
 
-        # 1. 邮箱与微信提醒卡片 (Grouped Section)
+        # 1. 邮箱与微信提醒卡片
         c1 = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
         c1.pack(fill="x", pady=(0, 16))
 
@@ -310,7 +295,6 @@ class AppleStyleFinanceApp(ctk.CTk):
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=15, weight="bold")
         ).pack(anchor="w", padx=20, pady=(16, 4))
 
-        # 贴心高亮提示条
         tip_box = ctk.CTkFrame(c1, corner_radius=10, fg_color=("#e0f2fe", "#082f49"))
         tip_box.pack(fill="x", padx=20, pady=(4, 12))
         ctk.CTkLabel(
@@ -322,14 +306,12 @@ class AppleStyleFinanceApp(ctk.CTk):
             justify="left"
         ).pack(anchor="w", padx=12, pady=8)
 
-        # 发件邮箱
         r1 = ctk.CTkFrame(c1, fg_color="transparent")
         r1.pack(fill="x", padx=20, pady=6)
         ctk.CTkLabel(r1, text="发件人 QQ 邮箱:", width=140, anchor="w", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)).pack(side="left")
         self.ent_sender = ctk.CTkEntry(r1, width=320, corner_radius=8, placeholder_text="例如: your_qq@qq.com")
         self.ent_sender.pack(side="left", padx=10)
 
-        # 授权码
         r2 = ctk.CTkFrame(c1, fg_color="transparent")
         r2.pack(fill="x", padx=20, pady=6)
         ctk.CTkLabel(r2, text="16位 SMTP 授权码:", width=140, anchor="w", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)).pack(side="left")
@@ -338,14 +320,13 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.btn_pwd_eye = ctk.CTkButton(r2, text="显示", width=55, corner_radius=6, fg_color=("gray80", "gray35"), text_color=("black", "white"), command=self._toggle_pwd)
         self.btn_pwd_eye.pack(side="left")
 
-        # 接收邮箱
         r3 = ctk.CTkFrame(c1, fg_color="transparent")
         r3.pack(fill="x", padx=20, pady=(6, 18))
         ctk.CTkLabel(r3, text="接收人邮箱 (微信接收):", width=140, anchor="w", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)).pack(side="left")
         self.ent_receiver = ctk.CTkEntry(r3, width=320, corner_radius=8, placeholder_text="填入发件人或留空即默认发给自己")
         self.ent_receiver.pack(side="left", padx=10)
 
-        # 2. 信息源选择与去重策略 (Grouped Section)
+        # 2. 信息源选择与去重策略
         c_src = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
         c_src.pack(fill="x", pady=(0, 16))
 
@@ -369,25 +350,23 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.chk_cls = ctk.CTkCheckBox(r_src, text="财联社 (AKShare)", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12))
         self.chk_cls.pack(side="left", padx=(0, 20))
 
-        # 去重开关与说明
         r_dedup = ctk.CTkFrame(c_src, fg_color="transparent")
         r_dedup.pack(fill="x", padx=20, pady=(10, 16))
-
         self.chk_dedup = ctk.CTkCheckBox(
             r_dedup,
-            text="开启高精度相似度跨源去重 (基于序列算法自动识别多源重复事件，自动归并并保留最丰富报道)",
+            text="开启跨源智能相似度去重 (基于序列比对算法自动识别多源重复事件，自动归并并保留最丰富报道)",
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)
         )
         self.chk_dedup.pack(side="left")
         self.chk_dedup.select()
 
-        # 3. 大模型 AI 分析设置 (Grouped Section)
+        # 3. 大模型 AI 分析设置 (支持 Prompt 自定义与连通性测试)
         c2 = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
         c2.pack(fill="x", pady=(0, 16))
 
         ctk.CTkLabel(
             c2,
-            text="🤖 大模型 AI 智能分析 (全兼容主流厂商)",
+            text="🤖 大模型 AI 智能分析与自定义提示词 (Prompt)",
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=15, weight="bold")
         ).pack(anchor="w", padx=20, pady=(16, 6))
 
@@ -395,7 +374,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         r4.pack(fill="x", padx=20, pady=4)
         self.switch_llm = ctk.CTkSwitch(
             r4,
-            text="启用 AI 智能分析 (自动提炼精选核心事实，并生成利好/利空投研视点)",
+            text="启用 AI 智能分析 (自动提炼重点，生成利好/利空投研视点)",
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)
         )
         self.switch_llm.pack(side="left")
@@ -433,12 +412,50 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.ent_ai_url.pack(side="left", padx=10)
 
         r8 = ctk.CTkFrame(c2, fg_color="transparent")
-        r8.pack(fill="x", padx=20, pady=(4, 18))
+        r8.pack(fill="x", padx=20, pady=4)
         ctk.CTkLabel(r8, text="模型名称 (Model):", width=140, anchor="w", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12)).pack(side="left")
         self.ent_ai_model = ctk.CTkEntry(r8, width=220, corner_radius=8, placeholder_text="deepseek-chat")
         self.ent_ai_model.pack(side="left", padx=10)
 
-        # 4. 定时轮询卡片 (Grouped Section)
+        self.btn_test_ai = ctk.CTkButton(
+            r8,
+            text="⚡ 立即测试 AI 连通性",
+            width=150,
+            corner_radius=8,
+            fg_color=APPLE_PURPLE,
+            hover_color="#9333ea",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11, weight="bold"),
+            command=self._test_ai_connection
+        )
+        self.btn_test_ai.pack(side="left", padx=12)
+
+        # 自定义提示词输入区
+        r_prompt_lbl = ctk.CTkFrame(c2, fg_color="transparent")
+        r_prompt_lbl.pack(fill="x", padx=20, pady=(10, 4))
+        ctk.CTkLabel(
+            r_prompt_lbl,
+            text="自定义 System Prompt (提示词):",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold")
+        ).pack(side="left")
+
+        btn_reset_prompt = ctk.CTkButton(
+            r_prompt_lbl,
+            text="↺ 恢复默认投研提示词",
+            width=130,
+            height=24,
+            corner_radius=6,
+            fg_color=("gray85", "gray30"),
+            hover_color=("gray75", "gray40"),
+            text_color=("black", "white"),
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11),
+            command=self._reset_to_default_prompt
+        )
+        btn_reset_prompt.pack(side="right")
+
+        self.txt_prompt = ctk.CTkTextbox(c2, height=120, font=("Consolas", 10), corner_radius=8)
+        self.txt_prompt.pack(fill="x", padx=20, pady=(0, 16))
+
+        # 4. 定时轮询卡片
         c3 = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
         c3.pack(fill="x", pady=(0, 16))
 
@@ -491,12 +508,11 @@ class AppleStyleFinanceApp(ctk.CTk):
         return page
 
     # -------------------------------------------------------------
-    # 页面 3：原生卡片式高颜值新手指南 (告别难看的纯文本框)
+    # 页面 3：原生卡片式高颜值新手指南
     # -------------------------------------------------------------
     def _create_guide_page(self):
         page = ctk.CTkScrollableFrame(self.content_container, corner_radius=16, fg_color="transparent")
 
-        # 页面标题
         header = ctk.CTkFrame(page, fg_color="transparent")
         header.pack(fill="x", pady=(0, 16))
         ctk.CTkLabel(
@@ -618,7 +634,6 @@ class AppleStyleFinanceApp(ctk.CTk):
             justify="left"
         ).pack(anchor="w", padx=22, pady=(0, 16))
 
-        # 跳转按钮
         ctk.CTkButton(
             page,
             text="👉 前往【系统与 AI 配置】进行配置",
@@ -662,6 +677,56 @@ class AppleStyleFinanceApp(ctk.CTk):
 
             self.lbl_provider_note.configure(text=f"📌 {info['note']}")
 
+    def _reset_to_default_prompt(self):
+        self.txt_prompt.delete("1.0", "end")
+        self.txt_prompt.insert("1.0", DEFAULT_SYSTEM_PROMPT.strip())
+        self.log("↺ 已恢复默认专业投研分析 System Prompt。")
+
+    def _test_ai_connection(self):
+        """测试大模型 API 连通性并弹出诊断结果"""
+        api_key = self.ent_ai_key.get().strip()
+        base_url = self.ent_ai_url.get().strip()
+        model = self.ent_ai_model.get().strip()
+
+        if not api_key and "localhost" not in base_url:
+            messagebox.showwarning("提示", "请先填入 API Key 秘钥！")
+            return
+
+        self.btn_test_ai.configure(state="disabled", text="正在测试连接...")
+        self.log(f"⚡ 开始测试大模型 API 连通性 (Model: {model}) ...")
+
+        def worker():
+            start_t = time.time()
+            test_sample = [
+                {"time": "16:00", "title": "中央汇金加大ETF增持力度", "content": "中央汇金公司今日公告，充分认可当前A股市场配置价值，已再次扩大交易型开放式指数基金(ETF)增持范围。"}
+            ]
+            try:
+                res = analyze_news_with_llm(
+                    test_sample,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    system_prompt=self.txt_prompt.get("1.0", "end").strip()
+                )
+                duration = round(time.time() - start_t, 2)
+                if res and "ai_comment" in res[0]:
+                    comment = res[0]["ai_comment"]
+                    self.after(0, lambda: self.log(f"🎉 AI 连通测试成功！耗时 {duration}s。AI点评: {comment}"))
+                    self.after(0, lambda: messagebox.showinfo(
+                        "测试成功",
+                        f"✅ 大模型 API 连接正常！\n\n• 耗时: {duration} 秒\n• 模型: {model}\n• 投研视点输出样例:\n「{comment}」"
+                    ))
+                else:
+                    self.after(0, lambda: self.log("⚠️ 连接成功但未输出规范点评，请检查提示词。"))
+                    self.after(0, lambda: messagebox.showwarning("提示", "接口有返回，但未按规范输出点评字段。"))
+            except Exception as e:
+                self.after(0, lambda: self.log(f"❌ AI 连通测试失败: {e}"))
+                self.after(0, lambda: messagebox.showerror("连接失败", f"调用失败，错误信息:\n{e}"))
+            finally:
+                self.after(0, lambda: self.btn_test_ai.configure(state="normal", text="⚡ 立即测试 AI 连通性"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _on_sched_mode_changed(self):
         mode = self.sched_mode_var.get()
         if mode == "classic":
@@ -682,7 +747,6 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.ent_auth.insert(0, self.cfg.get("sender_auth_code", ""))
         self.ent_receiver.insert(0, self.cfg.get("receiver_email", ""))
 
-        # 信源勾选
         sources = self.cfg.get("sources", ["sina", "wscn"])
         if "sina" in sources:
             self.chk_sina.select()
@@ -718,6 +782,11 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.ent_ai_url.insert(0, self.cfg.get("llm_base_url", "https://api.deepseek.com"))
         self.ent_ai_model.insert(0, self.cfg.get("llm_model", "deepseek-chat"))
 
+        # 载入自定义 Prompt
+        custom_p = self.cfg.get("custom_prompt", "")
+        self.txt_prompt.delete("1.0", "end")
+        self.txt_prompt.insert("1.0", custom_p.strip() if custom_p.strip() else DEFAULT_SYSTEM_PROMPT.strip())
+
         mode = self.cfg.get("schedule_mode", "classic")
         self.sched_mode_var.set(mode)
         self.ent_custom_times.insert(0, self.cfg.get("custom_times", "09:15, 14:30, 21:00"))
@@ -744,6 +813,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.cfg["llm_api_key"] = self.ent_ai_key.get().strip()
         self.cfg["llm_base_url"] = self.ent_ai_url.get().strip()
         self.cfg["llm_model"] = self.ent_ai_model.get().strip()
+        self.cfg["custom_prompt"] = self.txt_prompt.get("1.0", "end").strip()
         self.cfg["schedule_mode"] = self.sched_mode_var.get()
         self.cfg["custom_times"] = self.ent_custom_times.get().strip()
 
@@ -774,7 +844,8 @@ class AppleStyleFinanceApp(ctk.CTk):
                         cleaned,
                         api_key=self.ent_ai_key.get().strip(),
                         base_url=self.ent_ai_url.get().strip(),
-                        model=self.ent_ai_model.get().strip()
+                        model=self.ent_ai_model.get().strip(),
+                        system_prompt=self.txt_prompt.get("1.0", "end").strip()
                     )
                     self.current_news_list = analyzed
                 else:
@@ -795,13 +866,14 @@ class AppleStyleFinanceApp(ctk.CTk):
 
         api_key = self.ent_ai_key.get().strip()
         base_url = self.ent_ai_url.get().strip()
+        model = self.ent_ai_model.get().strip()
         if not api_key and "localhost" not in base_url:
             messagebox.showwarning("提示", "请先在【系统与 AI 配置】中填写 API Key！")
             self._switch_page("settings")
             return
 
         self.btn_ai.configure(state="disabled")
-        self.log(f"🤖 正在调用 {self.ent_ai_model.get().strip()} 模型深入研判...")
+        self.log(f"🤖 正在调用 {model} 模型深入研判...")
 
         def worker():
             try:
@@ -809,7 +881,8 @@ class AppleStyleFinanceApp(ctk.CTk):
                     self.current_news_list,
                     api_key=api_key,
                     base_url=base_url,
-                    model=self.ent_ai_model.get().strip()
+                    model=model,
+                    system_prompt=self.txt_prompt.get("1.0", "end").strip()
                 )
                 self.current_news_list = analyzed
                 self.after(0, self._render_cards, self.current_news_list)
@@ -839,7 +912,6 @@ class AppleStyleFinanceApp(ctk.CTk):
             tag = item.get("tag", "")
             src = item.get("source", "快讯")
 
-            # Apple 现代圆角微阴影卡片
             card = ctk.CTkFrame(
                 self.cards_scroll,
                 corner_radius=14,
@@ -849,7 +921,6 @@ class AppleStyleFinanceApp(ctk.CTk):
             )
             card.pack(fill="x", padx=4, pady=6)
 
-            # 卡片 Header
             head_row = ctk.CTkFrame(card, fg_color="transparent")
             head_row.pack(fill="x", padx=14, pady=(12, 4))
 
@@ -894,7 +965,6 @@ class AppleStyleFinanceApp(ctk.CTk):
                     text_color=sent_color
                 ).pack(side="right", padx=6)
 
-            # 正文内容
             ctk.CTkLabel(
                 card,
                 text=content,
@@ -953,11 +1023,9 @@ class AppleStyleFinanceApp(ctk.CTk):
                     self.current_news_list = data
                     self.after(0, self._render_cards, data)
 
-                # 导出备份表格
                 csv_file = os.path.join(os.path.dirname(__file__), "财经热点汇总.csv")
                 export_to_excel(data, output_path=csv_file)
 
-                # 渲染 HTML 并发送
                 html_card = build_html_card(data)
                 subject = f"📈 财经早报与智能热点精选 ({datetime.now().strftime('%m月%d日 %H:%M')})"
 

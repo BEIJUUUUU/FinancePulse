@@ -1,13 +1,7 @@
 """
 大模型 (LLM) 财经分析与点评引擎
-全兼容 OpenAI 标准接口协议，内置各大主流服务商快速预设：
-- DeepSeek (深度求索)
-- Kimi / Moonshot (月之暗面)
-- 智谱 AI (GLM-4-Flash / GLM-4)
-- 阿里通义千问 (Qwen-Turbo / Qwen-Plus)
-- OpenAI (GPT-4o-mini / GPT-4o)
-- Ollama 本地开源大模型 (Qwen / Llama，无需 API Key)
-- 自定义兼容接口 (Custom)
+支持动态自定义 Prompt 提示词，全兼容 OpenAI 标准接口协议
+具备详细的错误排查与智能诊断机制
 """
 import json
 import urllib.request
@@ -18,7 +12,7 @@ LLM_PROVIDERS = {
     "DeepSeek (深度求索)": {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
-        "note": "超高性价比，逻辑分析能力强 (推荐)"
+        "note": "官方标准模型名 deepseek-chat (对应 V3) 或 deepseek-reasoner (对应 R1)"
     },
     "Kimi / Moonshot (月之暗面)": {
         "base_url": "https://api.moonshot.cn/v1",
@@ -52,7 +46,7 @@ LLM_PROVIDERS = {
     }
 }
 
-PROMPT_SYSTEM = """你是一位资深的宏观经济与证券市场投研分析师。
+DEFAULT_SYSTEM_PROMPT = """你是一位资深的宏观经济与证券市场投研分析师。
 请对输入的财经快讯列表进行专业过滤与深度提炼：
 1. 挑选出最具有投资决策价值、宏观或行业影响力的重点事件；
 2. 为每条资讯提供精炼的核心要点；
@@ -75,7 +69,8 @@ def analyze_news_with_llm(
     news_list: list[dict],
     api_key: str = "",
     base_url: str = "https://api.deepseek.com",
-    model: str = "deepseek-chat"
+    model: str = "deepseek-chat",
+    system_prompt: str = ""
 ) -> list[dict]:
     """
     调用大模型对财经资讯进行深度结构化分析与点评
@@ -88,7 +83,7 @@ def analyze_news_with_llm(
         if not api_key:
             api_key = "ollama"
     elif not api_key:
-        print("[LLM] 未配置 API_KEY，跳过大模型分析。")
+        print("[LLM 提示] 未配置 API_KEY，跳过大模型分析。")
         return news_list
 
     # 规范 base_url 补全
@@ -104,10 +99,12 @@ def analyze_news_with_llm(
         input_texts.append(f"{idx}. [{item.get('time', '')}] {item.get('title', '')} - {item.get('content', '')}")
     user_prompt = "以下是最新抓取的全球与国内财经快讯列表，请精选并给出专业投研点评：\n" + "\n".join(input_texts)
 
+    prompt_to_use = system_prompt.strip() if system_prompt and system_prompt.strip() else DEFAULT_SYSTEM_PROMPT
+
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": PROMPT_SYSTEM},
+            {"role": "system", "content": prompt_to_use},
             {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.2
@@ -137,9 +134,19 @@ def analyze_news_with_llm(
 
             parsed_list = json.loads(raw_reply.strip())
             if isinstance(parsed_list, list) and len(parsed_list) > 0:
-                print(f"[LLM] 大模型分析成功！生成了 {len(parsed_list)} 条精选点评。")
+                print(f"[LLM] 大模型分析成功！成功生成 {len(parsed_list)} 条精选专业投研视点。")
                 return parsed_list
 
+    except urllib.error.HTTPError as e:
+        err_detail = ""
+        try:
+            err_detail = e.read().decode("utf-8")
+        except Exception:
+            pass
+        print(f"[LLM 接口错误 HTTP {e.code}] {e.reason} -> 详情: {err_detail}")
+        # 如果是 400 错误，通常是模型名不对
+        if "Model Not Exist" in err_detail or "does not exist" in err_detail or e.code == 400:
+            print(f"[LLM 智能排查] 请检查模型名称 '{model}' 是否正确。DeepSeek 官方模型名为 deepseek-chat 或 deepseek-reasoner。")
     except Exception as e:
         print(f"[LLM 异常] 调用大模型分析异常: {e}，自动降级为原始资讯。")
 
