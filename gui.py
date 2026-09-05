@@ -442,11 +442,11 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.cards_scroll.pack(fill="both", expand=True, pady=(0, 10))
 
-        log_card = ctk.CTkFrame(page, height=72, corner_radius=14, fg_color=("white", "#27272a"), border_width=1, border_color=("gray85", "gray30"))
+        log_card = ctk.CTkFrame(page, height=150, corner_radius=14, fg_color=("white", "#27272a"), border_width=1, border_color=("gray85", "gray30"))
         log_card.pack(fill="x")
 
-        self.log_text = ctk.CTkTextbox(log_card, height=65, font=("Consolas", 10), wrap="word", fg_color="transparent")
-        self.log_text.pack(fill="both", expand=True, padx=10, pady=4)
+        self.log_text = ctk.CTkTextbox(log_card, height=140, font=("Microsoft YaHei UI", 12), wrap="word", fg_color="transparent")
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=6)
 
         return page
 
@@ -466,7 +466,8 @@ class AppleStyleFinanceApp(ctk.CTk):
         tip_box.pack(fill="x", padx=20, pady=(4, 12))
         ctk.CTkLabel(
             tip_box,
-            text="接收邮箱直接填回发件人即可，自己发给自己绝对不进垃圾箱。微信开启「QQ邮箱提醒」后可秒级接收卡片通知。",
+            text="接收邮箱直接填回发件人即可，自己发给自己绝对不进垃圾箱。微信开启「QQ邮箱提醒」后可秒级接收卡片通知。\n"
+                 "支持多邮箱群发：接收人邮箱填多个地址并用逗号隔开即可（如 a@qq.com, b@qq.com），每个邮箱的微信都能收到提醒。",
             font=self.f_small,
             text_color=("#0369a1", "#38bdf8"),
             wraplength=760,
@@ -1152,15 +1153,22 @@ class AppleStyleFinanceApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_push_history(self):
-        """在日志窗口展示最近 20 条推送历史"""
+        """在日志窗口展示最近 20 条推送历史 (大字号易读格式)"""
         records = history_db.recent_pushes(limit=20)
         if not records:
             self.log("📜 暂无推送历史记录。")
             return
-        self.log(f"📜 最近 {len(records)} 条推送历史:")
+
+        self.log("─────────────────────────────────────────")
+        self.log(f"📜 最近推送历史 (共 {len(records)} 条，最新在前):")
         for r in records:
-            tag_info = f"[{r['tag']}]" if r.get("tag") else ""
-            self.log(f"   {r['pushed_at'][5:16]} {tag_info} {r['title'][:40]}")
+            # pushed_at 形如 2026-09-05T20:45:11，取 月-日 时:分
+            when = (r.get("pushed_at") or "")[5:16].replace("T", " ")
+            tag_info = r.get("tag") or "综合"
+            sent = r.get("sentiment") or ""
+            title = (r.get("title") or "")[:42]
+            self.log(f"📌 {when} 〈{tag_info}〉{title}{'  (' + sent + ')' if sent else ''}")
+        self.log("─────────────────────────────────────────")
 
     def _on_sched_mode_changed(self):
         mode = self.sched_mode_var.get()
