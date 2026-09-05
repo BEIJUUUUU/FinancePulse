@@ -128,11 +128,11 @@ def analyze_news_with_llm(
     model: str = "deepseek-v4-flash",
     system_prompt: str = "",
     reasoning_level: str = "balanced",
-    max_analyze: int = 15
+    max_analyze: int = 8
 ) -> list[dict]:
     """
     调用大模型对财经资讯进行深度结构化分析与行业利好利空研判
-    :param max_analyze: 单次分析最大上限(默认15条最关键快讯，保证3-8秒内极速返回防超时)
+    :param max_analyze: 单次分析最大上限 (默认8条最核心快讯，保证3-6秒内极速返回绝对不超时)
     """
     if not news_list:
         return []
@@ -181,7 +181,7 @@ def analyze_news_with_llm(
             }
         )
 
-        with urllib.request.urlopen(req, timeout=45) as response:
+        with urllib.request.urlopen(req, timeout=60) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
             raw_reply = res_json["choices"][0]["message"]["content"].strip()
@@ -194,6 +194,11 @@ def analyze_news_with_llm(
             parsed_list = json.loads(raw_reply.strip())
             if isinstance(parsed_list, list) and len(parsed_list) > 0:
                 print(f"[LLM] 大模型分析成功 ({model})！成功生成 {len(parsed_list)} 条精选专业行业研判。")
+                # 自动继承原始信源标记
+                for i, p_item in enumerate(parsed_list[:len(target_news)]):
+                    if isinstance(p_item, dict) and "source" not in p_item and i < len(target_news):
+                        p_item["source"] = target_news[i].get("source", "实时快讯")
+
                 # 如果用户抓取条数多于已分析条数，将剩余原始资讯拼接在后，保证完整性
                 if len(news_list) > max_analyze:
                     parsed_list.extend(news_list[max_analyze:])

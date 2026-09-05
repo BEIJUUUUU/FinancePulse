@@ -190,7 +190,10 @@ def build_markdown_table(news_list: list[dict]) -> str:
     return "\n".join(lines)
 
 def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇总.csv") -> str:
-    """导出为本地表格文件"""
+    """导出为本地表格文件 (具备全字段安全容错与零依赖自动降级)"""
+    if not news_list:
+        return output_path
+
     try:
         import pandas as pd
         df = pd.DataFrame(news_list)
@@ -198,7 +201,7 @@ def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇�
             "time": "发布时间",
             "title": "新闻标题",
             "content": "核心内容",
-            "ai_comment": "AI点评",
+            "ai_comment": "AI投研视点",
             "sentiment": "情绪导向",
             "impact_degree": "影响程度",
             "beneficiary": "潜在受益行业",
@@ -210,13 +213,20 @@ def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇�
         xlsx_path = output_path.replace(".csv", ".xlsx")
         df.to_excel(xlsx_path, index=False)
         return xlsx_path
-    except ImportError:
+    except Exception:
         csv_path = output_path.replace(".xlsx", ".csv")
+        # 动态提取所有字典的所有键并集，避免部分行字段不一致
+        all_keys = []
+        for item in news_list:
+            if isinstance(item, dict):
+                for k in item.keys():
+                    if k not in all_keys:
+                        all_keys.append(k)
+
         with open(csv_path, mode="w", newline="", encoding="utf-8-sig") as f:
-            if news_list:
-                fields = list(news_list[0].keys())
-                writer = csv.DictWriter(f, fieldnames=fields)
-                writer.writeheader()
-                for row in news_list:
-                    writer.writerow(row)
+            # extrasaction="ignore" 彻底杜绝字段不匹配引发的异常
+            writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
+            writer.writeheader()
+            for row in news_list:
+                writer.writerow(row)
         return csv_path
