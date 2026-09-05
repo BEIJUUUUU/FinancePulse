@@ -224,6 +224,17 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.combo_count.pack(side="left", padx=(0, 10), pady=12)
         self.combo_count.set(str(self.cfg.get("news_limit", 20)))
 
+        ctk.CTkLabel(toolbar, text="分类筛选:", font=self.f_body).pack(side="left", padx=(4, 4), pady=12)
+        self.combo_cat_filter = ctk.CTkComboBox(
+            toolbar,
+            values=["全部分类", "宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"],
+            width=108,
+            corner_radius=8,
+            command=self._on_category_filter_changed
+        )
+        self.combo_cat_filter.pack(side="left", padx=(0, 10), pady=12)
+        self.combo_cat_filter.set("全部分类")
+
         self.btn_fetch = ctk.CTkButton(
             toolbar,
             text="抓取最新快讯",
@@ -371,7 +382,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.chk_cls.pack(side="left", padx=(0, 20))
 
         r_dedup = ctk.CTkFrame(c_src, fg_color="transparent")
-        r_dedup.pack(fill="x", padx=20, pady=(10, 16))
+        r_dedup.pack(fill="x", padx=20, pady=(10, 8))
         self.chk_dedup = ctk.CTkCheckBox(
             r_dedup,
             text="开启跨源智能相似度去重 (自动识别同类事件报道并合并归并，保留内容最详尽的源)",
@@ -379,6 +390,32 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.chk_dedup.pack(side="left")
         self.chk_dedup.select()
+
+        # 关注领域分类多选
+        r_cat_lbl = ctk.CTkFrame(c_src, fg_color="transparent")
+        r_cat_lbl.pack(fill="x", padx=20, pady=(8, 2))
+        ctk.CTkLabel(r_cat_lbl, text="关注领域分类 (仅保留所选领域的要闻，未勾选的杂讯自动剔除):", font=self.f_small_bold).pack(side="left")
+
+        r_cats = ctk.CTkFrame(c_src, fg_color="transparent")
+        r_cats.pack(fill="x", padx=20, pady=(4, 16))
+
+        self.chk_cat_macro = ctk.CTkCheckBox(r_cats, text="宏观政策", font=self.f_body)
+        self.chk_cat_macro.pack(side="left", padx=(0, 14))
+
+        self.chk_cat_stock = ctk.CTkCheckBox(r_cats, text="A股市场", font=self.f_body)
+        self.chk_cat_stock.pack(side="left", padx=(0, 14))
+
+        self.chk_cat_tech = ctk.CTkCheckBox(r_cats, text="科技产业", font=self.f_body)
+        self.chk_cat_tech.pack(side="left", padx=(0, 14))
+
+        self.chk_cat_comm = ctk.CTkCheckBox(r_cats, text="大宗商品", font=self.f_body)
+        self.chk_cat_comm.pack(side="left", padx=(0, 14))
+
+        self.chk_cat_global = ctk.CTkCheckBox(r_cats, text="全球要闻", font=self.f_body)
+        self.chk_cat_global.pack(side="left", padx=(0, 14))
+
+        self.chk_cat_social = ctk.CTkCheckBox(r_cats, text="社会民生 (灾害/事故/通报)", font=self.f_body)
+        self.chk_cat_social.pack(side="left")
 
         # 3. 大模型 AI 分析设置 (支持一键拉取可用模型与思考深度)
         c2 = ctk.CTkFrame(page, corner_radius=16, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
@@ -898,6 +935,15 @@ class AppleStyleFinanceApp(ctk.CTk):
         else:
             self.chk_dedup.deselect()
 
+        # 载入关注领域勾选
+        saved_cats = self.cfg.get("categories", ["宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"])
+        self.chk_cat_macro.select() if "宏观政策" in saved_cats else self.chk_cat_macro.deselect()
+        self.chk_cat_stock.select() if "A股市场" in saved_cats else self.chk_cat_stock.deselect()
+        self.chk_cat_tech.select() if "科技产业" in saved_cats else self.chk_cat_tech.deselect()
+        self.chk_cat_comm.select() if "大宗商品" in saved_cats else self.chk_cat_comm.deselect()
+        self.chk_cat_global.select() if "全球要闻" in saved_cats else self.chk_cat_global.deselect()
+        self.chk_cat_social.select() if "社会民生" in saved_cats else self.chk_cat_social.deselect()
+
         if self.cfg.get("llm_enabled", False):
             self.switch_llm.select()
         else:
@@ -940,11 +986,33 @@ class AppleStyleFinanceApp(ctk.CTk):
             sources.append("cls")
         return sources or ["sina", "wscn"]
 
+    def _get_enabled_categories(self):
+        cats = []
+        if self.chk_cat_macro.get(): cats.append("宏观政策")
+        if self.chk_cat_stock.get(): cats.append("A股市场")
+        if self.chk_cat_tech.get(): cats.append("科技产业")
+        if self.chk_cat_comm.get(): cats.append("大宗商品")
+        if self.chk_cat_global.get(): cats.append("全球要闻")
+        if self.chk_cat_social.get(): cats.append("社会民生")
+        return cats or ["宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"]
+
+    def _on_category_filter_changed(self, choice: str):
+        if not self.current_news_list:
+            return
+        if choice == "全部分类":
+            self._render_cards(self.current_news_list)
+            self.log(f"已恢复呈现全部快讯 (共 {len(self.current_news_list)} 条)")
+        else:
+            filtered = [item for item in self.current_news_list if item.get("tag") == choice]
+            self._render_cards(filtered)
+            self.log(f"已切换分类视图: 【{choice}】(呈现 {len(filtered)} 条)")
+
     def _save_all_settings(self):
         self.cfg["sender_email"] = self.ent_sender.get().strip()
         self.cfg["sender_auth_code"] = self.ent_auth.get().strip()
         self.cfg["receiver_email"] = self.ent_receiver.get().strip() or self.cfg["sender_email"]
         self.cfg["sources"] = self._get_enabled_sources()
+        self.cfg["categories"] = self._get_enabled_categories()
         self.cfg["enable_dedup"] = bool(self.chk_dedup.get())
         self.cfg["llm_enabled"] = bool(self.switch_llm.get())
         self.cfg["llm_provider"] = self.combo_provider.get()
@@ -966,16 +1034,19 @@ class AppleStyleFinanceApp(ctk.CTk):
     def _on_fetch_news(self):
         limit = int(self.combo_count.get() or 20)
         sources = self._get_enabled_sources()
+        categories = self._get_enabled_categories()
         dedup = bool(self.chk_dedup.get())
 
         self.btn_fetch.configure(state="disabled")
-        self.log(f"正在从已选信源 ({', '.join(sources)}) 抓取前 {limit} 条快讯...")
+        cat_desc = "、".join(categories[:3]) + ("等" if len(categories) > 3 else "")
+        self.log(f"正在从已选信源抓取前 {limit} 条快讯 (关注领域: {cat_desc})...")
 
         def worker():
             try:
-                raw = fetch_cls_news(limit=limit, enabled_sources=sources)
+                raw = fetch_cls_news(limit=limit * 2, enabled_sources=sources)
                 threshold = 0.48 if dedup else 0.99
-                cleaned = filter_and_clean_news(raw, dedup_threshold=threshold, max_limit=limit)
+                # 传入 allowed_categories 进行领域精准过滤！
+                cleaned = filter_and_clean_news(raw, allowed_categories=categories, dedup_threshold=threshold, max_limit=limit)
 
                 # 若开启 AI 且配了 Key，自动触发提炼
                 if self.switch_llm.get() and self.ent_ai_key.get().strip():
@@ -987,13 +1058,14 @@ class AppleStyleFinanceApp(ctk.CTk):
                         model=self.combo_ai_model.get().strip(),
                         system_prompt=self.txt_prompt.get("1.0", "end").strip(),
                         reasoning_level=self._get_reasoning_level(),
-                        max_analyze=15
+                        max_analyze=12
                     )
                     self.current_news_list = analyzed
                 else:
                     self.current_news_list = cleaned
 
                 self.after(0, self._render_cards, self.current_news_list)
+                self.after(0, lambda: self.combo_cat_filter.set("全部分类"))
             except Exception as e:
                 self.after(0, lambda: self.log(f"抓取异常: {e}"))
             finally:

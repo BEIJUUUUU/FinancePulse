@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "news_limit": 20,
     "sources": ["sina", "wscn"],
     "enable_dedup": True,
+    "categories": ["宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"],
     "schedule_enabled": False,
     "schedule_mode": "classic",
     "schedule_times": ["08:30", "12:00", "16:00"],
@@ -24,7 +25,7 @@ DEFAULT_CONFIG = {
     "llm_enabled": False,
     "llm_api_key": "",
     "llm_base_url": "https://api.deepseek.com",
-    "llm_model": "deepseek-chat",
+    "llm_model": "deepseek-v4-flash",
     "llm_reasoning_level": "balanced",
     "custom_prompt": "",
     "ui_theme": "System"
@@ -62,11 +63,12 @@ RECEIVER_EMAIL = _active_cfg["receiver_email"]
 NEWS_LIMIT = _active_cfg.get("news_limit", 20)
 SOURCES = _active_cfg.get("sources", ["sina", "wscn"])
 ENABLE_DEDUP = _active_cfg.get("enable_dedup", True)
+CATEGORIES = _active_cfg.get("categories", ["宏观政策", "A股市场", "科技产业", "大宗商品", "全球要闻"])
 FILTER_KEYWORDS = [k.strip() for k in _active_cfg.get("filter_keywords", "").split(",") if k.strip()]
 LLM_ENABLED = _active_cfg.get("llm_enabled", False)
 LLM_API_KEY = _active_cfg.get("llm_api_key", "")
 LLM_BASE_URL = _active_cfg.get("llm_base_url", "https://api.deepseek.com")
-LLM_MODEL = _active_cfg.get("llm_model", "deepseek-chat")
+LLM_MODEL = _active_cfg.get("llm_model", "deepseek-v4-flash")
 LLM_REASONING_LEVEL = _active_cfg.get("llm_reasoning_level", "balanced")
 CUSTOM_PROMPT = _active_cfg.get("custom_prompt", "")
 UI_THEME = _active_cfg.get("ui_theme", "System")

@@ -1,9 +1,61 @@
 """
-资讯处理模块：多维相似度智能去重、行业利好/利空细分、影响程度分级与苹果风研报生成
+资讯处理模块：多维相似度智能去重、领域分类过滤、行业利好/利空细分与苹果风研报生成
 """
 import csv
 import difflib
 from datetime import datetime
+
+# 权威领域分类词典
+CATEGORY_KEYWORDS = {
+    "科技产业": [
+        "AI", "人工智能", "算力", "芯片", "半导体", "光模块", "具身智能", "机器人",
+        "大模型", "自动驾驶", "智能汽车", "锂电", "电池", "储能", "光伏", "低空经济",
+        "新能源", "智能终端", "英伟达", "华为", "苹果", "鸿海", "OpenAI", "软银", "通信"
+    ],
+    "A股市场": [
+        "A股", "沪指", "深成指", "创业板", "科创板", "上交所", "深交所", "证监会",
+        "券商", "中证协", "涨停", "跌停", "增持", "回购", "减持", "分红", "净利",
+        "业绩", "上市公司", "ETF", "两市", "融资融券", "龙虎榜", "IPO", "股票"
+    ],
+    "宏观政策": [
+        "央行", "财政部", "发改委", "降息", "降准", "公开市场", "逆回购", "国债",
+        "利率", "汇率", "通胀", "CPI", "PPI", "GDP", "稳增长", "稳就业", "货币政策",
+        "财政政策", "国务院", "宏观", "管委会"
+    ],
+    "大宗商品": [
+        "原油", "布伦特", "WTI", "黄金", "贵金属", "白银", "铜", "铝", "钢铁",
+        "煤炭", "天然气", "现货", "期货", "铁矿石", "油价", "粮食", "农产品", "产气"
+    ],
+    "全球要闻": [
+        "美联储", "美股", "纳斯达克", "道琼斯", "标普", "欧洲央行", "非农", "外贸",
+        "出口", "美债", "特使", "停火", "俄乌", "中东", "加息", "国际", "莫斯科", "俄罗斯", "乌克兰"
+    ],
+    "社会民生": [
+        "暴雨", "洪涝", "汛限", "水库", "泥石流", "台风", "抢险", "遇难", "搜救",
+        "地质灾害", "通报", "违规", "立案", "染色", "莴笋", "降温", "受灾", "民用", "事故"
+    ]
+}
+
+def detect_category(title: str, content: str) -> str:
+    """基于词典多重加权算法自动识别资讯所属领域"""
+    text = f"{title} {title} {content}".lower()  # 标题双倍权重
+    best_cat = "综合财经"
+    max_score = 0
+
+    for cat, kws in CATEGORY_KEYWORDS.items():
+        score = 0
+        for kw in kws:
+            if kw.lower() in text:
+                # 标题命中加 3 分，正文命中加 1 分
+                if kw.lower() in title.lower():
+                    score += 3
+                else:
+                    score += 1
+        if score > max_score:
+            max_score = score
+            best_cat = cat
+
+    return best_cat
 
 def _calculate_similarity(text1: str, text2: str) -> float:
     """计算两篇快讯的综合相似度 (序列匹配 + 字符二元组重叠)"""
@@ -22,13 +74,18 @@ def _calculate_similarity(text1: str, text2: str) -> float:
 def filter_and_clean_news(
     news_list: list[dict],
     keywords: list[str] = None,
+    allowed_categories: list[str] = None,
     dedup_threshold: float = 0.48,
     max_limit: int = 20
 ) -> list[dict]:
-    """智能去重与关键词过滤"""
+    """
+    智能领域分类过滤与跨源相似度去重
+    :param allowed_categories: 允许保留的领域列表 (如: ['科技产业', 'A股市场', '宏观政策'])
+    """
     if not news_list:
         return []
 
+    # 1. 领域自动识别与初筛
     filtered = []
     for item in news_list:
         title = item.get("title", "").strip()
@@ -36,12 +93,24 @@ def filter_and_clean_news(
         if not title:
             continue
 
+        # 自动判定并赋予领域标签 (若原本未打标)
+        if not item.get("tag") or item.get("tag") == "综合":
+            item["tag"] = detect_category(title, content)
+
+        # 领域分类过滤：如果不属于用户勾选的领域，直接剔除！
+        if allowed_categories and len(allowed_categories) > 0:
+            if item["tag"] not in allowed_categories:
+                continue
+
+        # 关键词过滤
         if keywords:
             full_text = title + content
             if not any(kw.lower() in full_text.lower() for kw in keywords):
                 continue
+
         filtered.append(item)
 
+    # 2. 跨源相似度去重
     unique_items = []
     for item in filtered:
         item_title = item.get("title", "")
@@ -75,7 +144,7 @@ def filter_and_clean_news(
     return unique_items
 
 def build_html_card(news_list: list[dict]) -> str:
-    """生成具备 Apple 极简现代设计语言的 HTML 邮件研报 (包含行业细分与影响分级)"""
+    """生成具备 Apple 极简现代设计语言的 HTML 邮件研报"""
     if not news_list:
         return "<p>暂无最新快讯。</p>"
 
@@ -91,7 +160,7 @@ def build_html_card(news_list: list[dict]) -> str:
         impact = item.get("impact_degree", "")
         beneficiary = item.get("beneficiary", "")
         adverse = item.get("adverse", "")
-        tag = item.get("tag", "")
+        tag = item.get("tag", "综合")
         source = item.get("source", "权威快讯")
 
         sentiment_badge = ""
@@ -101,9 +170,8 @@ def build_html_card(news_list: list[dict]) -> str:
             sent_txt = f"{sentiment}" + (f" · {impact}" if impact else "")
             sentiment_badge = f'<span style="background: {sent_bg}; color: {sent_color}; font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 600; margin-left: 6px;">{sent_txt}</span>'
 
-        tag_badge = f'<span style="background: #f3f4f6; color: #4b5563; font-size: 11px; padding: 2px 7px; border-radius: 9999px; margin-left: 4px;">{tag}</span>' if tag else ""
+        tag_badge = f'<span style="background: #f3f4f6; color: #4b5563; font-size: 11px; padding: 2px 7px; border-radius: 9999px; margin-left: 4px;">{tag}</span>'
 
-        # 行业受影响分析栏
         industry_bar = ""
         if (beneficiary and beneficiary != "无") or (adverse and adverse != "无"):
             ben_txt = f'<span style="color: #15803d; font-weight: 600;">受益: {beneficiary}</span>' if (beneficiary and beneficiary != "无") else ""
@@ -149,7 +217,7 @@ def build_html_card(news_list: list[dict]) -> str:
                 <h2 style="margin: 0; font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">财经脉搏 · 智能快讯研报</h2>
                 <span style="background: #2563eb; color: #ffffff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 9999px;">Pro</span>
             </div>
-            <p style="margin: 6px 0 0 0; font-size: 12px; color: #64748b;">报告时间：{now_str} ｜ 多源聚合去重 ｜ 行业影响研判</p>
+            <p style="margin: 6px 0 0 0; font-size: 12px; color: #64748b;">报告时间：{now_str} ｜ 领域分类过滤 ｜ 行业影响研判</p>
         </div>
 
         {cards_body}
@@ -167,13 +235,13 @@ def build_markdown_table(news_list: list[dict]) -> str:
         return "暂无最新快讯。"
 
     lines = [
-        "| 序号 | 时间 | 来源 | 核心要闻 | 情绪与影响 | 受益/受损行业 | 投研视点 |",
+        "| 序号 | 时间 | 领域 | 核心要闻 | 情绪与影响 | 受益/受损行业 | 投研视点 |",
         "| :---: | :---: | :---: | :--- | :---: | :--- | :--- |"
     ]
 
     for idx, item in enumerate(news_list, 1):
         t = item.get("time", "")
-        src = item.get("source", "快讯")
+        tag = item.get("tag", "综合")
         title = item.get("title", "").replace("|", " ")
         sentiment = item.get("sentiment", "中性")
         impact = item.get("impact_degree", "")
@@ -185,12 +253,12 @@ def build_markdown_table(news_list: list[dict]) -> str:
         
         ai_comment = item.get("ai_comment", item.get("content", "")[:35] + "...")
 
-        lines.append(f"| **{idx}** | `{t}` | {src} | **{title}** | {sent_str} | {ind_str} | {ai_comment} |")
+        lines.append(f"| **{idx}** | `{t}` | {tag} | **{title}** | {sent_str} | {ind_str} | {ai_comment} |")
 
     return "\n".join(lines)
 
 def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇总.csv") -> str:
-    """导出为本地表格文件 (具备全字段安全容错与零依赖自动降级)"""
+    """导出为本地表格文件"""
     if not news_list:
         return output_path
 
@@ -200,13 +268,13 @@ def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇�
         column_mapping = {
             "time": "发布时间",
             "title": "新闻标题",
+            "tag": "所属领域",
             "content": "核心内容",
             "ai_comment": "AI投研视点",
             "sentiment": "情绪导向",
             "impact_degree": "影响程度",
             "beneficiary": "潜在受益行业",
             "adverse": "潜在受损行业",
-            "tag": "所属领域",
             "source": "信源"
         }
         df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns}, inplace=True)
@@ -215,7 +283,6 @@ def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇�
         return xlsx_path
     except Exception:
         csv_path = output_path.replace(".xlsx", ".csv")
-        # 动态提取所有字典的所有键并集，避免部分行字段不一致
         all_keys = []
         for item in news_list:
             if isinstance(item, dict):
@@ -224,7 +291,6 @@ def export_to_excel(news_list: list[dict], output_path: str = "财经热点汇�
                         all_keys.append(k)
 
         with open(csv_path, mode="w", newline="", encoding="utf-8-sig") as f:
-            # extrasaction="ignore" 彻底杜绝字段不匹配引发的异常
             writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
             writer.writeheader()
             for row in news_list:

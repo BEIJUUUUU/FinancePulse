@@ -5,6 +5,12 @@ __pycache__/
 *.so
 .Python
 
+# 打包构建与交付文件
+build/
+dist/
+*.spec
+*.zip
+
 # 虚拟环境
 venv/
 env/
