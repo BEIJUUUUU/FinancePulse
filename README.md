@@ -40,9 +40,17 @@ FinancePulse/
 
 ---
 
-## 安装说明
+## 快速下载 (无需配置任何 Python 环境)
 
-### 1. 克隆代码仓库
+对于不熟悉 Python 环境配置的普通用户，建议直接前往 [GitHub Releases 页面](https://github.com/BEIJUUUUU/FinancePulse/releases/latest) 下载预编译的 Windows 绿色独立运行包：
+
+1. 下载 `FinancePulse-v2.5.0-Windows-x64.zip`；
+2. 解压压缩包至任意目录；
+3. 直接双击 `FinancePulse.exe` 即可启动，内置全套运行时与 UI 资源。
+
+---
+
+## 开发者安装与源码运行
 ```bash
 git clone https://github.com/BEIJUUUUU/FinancePulse.git
 cd FinancePulse
