@@ -1142,38 +1142,69 @@ class AppleStyleFinanceApp(ctk.CTk):
             self._switch_page("settings")
             return
 
-        self.btn_push.configure(state="disabled")
-        self.log(f"正在准备并推送研报邮件至 {receiver} ...")
+        # 校验 1：确保已先抓取了资讯，拒绝盲目发送
+        if not self.current_news_list:
+            messagebox.showwarning(
+                "提示",
+                "当前尚未抓取任何快讯！\n\n请先点击左上方【抓取最新快讯】，在界面上预览确认内容后再执行推送。"
+            )
+            return
+
+        # 校验 2：判断是否已执行过 AI 研报分析，给出明确确认选择
+        has_ai = any("ai_comment" in item for item in self.current_news_list)
+        need_run_ai = False
+
+        if not has_ai:
+            if self.switch_llm.get() and self.ent_ai_key.get().strip():
+                ans = messagebox.askyesnocancel(
+                    "推送确认与 AI 研判选择",
+                    f"当前已抓取 {len(self.current_news_list)} 条快讯，但尚未进行【AI 深度研报点评】。\n\n"
+                    "• 点击【是 (Yes)】：立即调用 AI 生成行业利好/利空分析后一并推送\n"
+                    "• 点击【否 (No)】：跳过 AI 分析，直接推送当前快讯表格\n"
+                    "• 点击【取消 (Cancel)】：取消本次推送"
+                )
+                if ans is None:
+                    return
+                need_run_ai = ans
+            else:
+                if not messagebox.askyesno("推送确认", f"确定将当前的 {len(self.current_news_list)} 条快讯立即推送到邮箱与微信？"):
+                    return
+        else:
+            if not messagebox.askyesno("推送确认", f"确定将已包含 AI 行业研报视点的 {len(self.current_news_list)} 条精选快讯立即推送到邮箱与微信？"):
+                return
+
+        self.btn_push.configure(state="disabled", text="正在发送...")
+        self.log(f"开始执行推送流程，目标邮箱: {receiver} ...")
 
         def worker():
             try:
-                data = self.current_news_list
-                if not data:
-                    raw = fetch_cls_news(limit=int(self.combo_count.get() or 20), enabled_sources=self._get_enabled_sources())
-                    data = filter_and_clean_news(raw, dedup_threshold=0.48 if self.chk_dedup.get() else 0.99)
+                data = list(self.current_news_list)
+
+                # 阶段 1: 若需先执行 AI 研判
+                if need_run_ai:
+                    self.after(0, lambda: self.log("步骤 1/3: 正在调用大模型生成行业影响分析与情绪分级..."))
+                    data = analyze_news_with_llm(
+                        data,
+                        api_key=self.ent_ai_key.get().strip(),
+                        base_url=self.ent_ai_url.get().strip(),
+                        model=self.combo_ai_model.get().strip(),
+                        system_prompt=self.txt_prompt.get("1.0", "end").strip(),
+                        reasoning_level=self._get_reasoning_level(),
+                        max_analyze=15
+                    )
                     self.current_news_list = data
+                    self.after(0, self._render_cards, data)
+                else:
+                    self.after(0, lambda: self.log("步骤 1/3: 快讯数据与分析已就绪。"))
 
-                # 若启用了 AI，发送前自动执行分析，确保微信 100% 收到行业研判与点评！
-                if self.switch_llm.get() and self.ent_ai_key.get().strip():
-                    has_ai = any("ai_comment" in item for item in data)
-                    if not has_ai:
-                        self.after(0, lambda: self.log("推送前自动调用大模型生成行业影响分析与情绪分级..."))
-                        data = analyze_news_with_llm(
-                            data,
-                            api_key=self.ent_ai_key.get().strip(),
-                            base_url=self.ent_ai_url.get().strip(),
-                            model=self.combo_ai_model.get().strip(),
-                            system_prompt=self.txt_prompt.get("1.0", "end").strip(),
-                            reasoning_level=self._get_reasoning_level(),
-                            max_analyze=15
-                        )
-                        self.current_news_list = data
-                        self.after(0, self._render_cards, data)
-
+                # 阶段 2: 导出与组装
+                self.after(0, lambda: self.log("步骤 2/3: 正在组装移动端 HTML 研报卡片与本地备份表格..."))
                 csv_file = os.path.join(os.path.dirname(__file__), "财经热点汇总.csv")
                 export_to_excel(data, output_path=csv_file)
-
                 html_card = build_html_card(data)
+
+                # 阶段 3: 连接邮箱服务器发送
+                self.after(0, lambda: self.log(f"步骤 3/3: 正在连接 SMTP 服务器发送邮件至 {receiver} ..."))
                 subject = f"财经早报与智能热点精选 ({datetime.now().strftime('%m月%d日 %H:%M')})"
 
                 ok = send_email_digest(
@@ -1187,14 +1218,16 @@ class AppleStyleFinanceApp(ctk.CTk):
                     attachment_path=csv_file
                 )
                 if ok:
-                    self.after(0, lambda: self.log(f"推送成功！已送达 {receiver}。微信开启QQ邮箱提醒的会立即收到弹窗！"))
+                    self.after(0, lambda: self.log(f"🎉 推送成功！已送达 {receiver}。微信开启QQ邮箱提醒的会立即收到弹窗！"))
                     self.after(0, lambda: messagebox.showinfo("发送成功", "研报已成功送达！若微信绑定了 QQ 邮箱提醒将立即收到带 AI 点评的微信卡片。"))
                 else:
-                    self.after(0, lambda: self.log("发送失败，请检查授权码或网络。"))
+                    self.after(0, lambda: self.log("❌ 发送失败，请检查授权码或网络连接。"))
+                    self.after(0, lambda: messagebox.showerror("发送失败", "邮件未能送达，请查看日志排查授权码或网络问题。"))
             except Exception as e:
-                self.after(0, lambda: self.log(f"发送异常: {e}"))
+                self.after(0, lambda: self.log(f"❌ 发送异常: {e}"))
+                self.after(0, lambda: messagebox.showerror("发生异常", str(e)))
             finally:
-                self.after(0, lambda: self.btn_push.configure(state="normal"))
+                self.after(0, lambda: self.btn_push.configure(state="normal", text="推送到微信/邮箱"))
 
         threading.Thread(target=worker, daemon=True).start()
 
