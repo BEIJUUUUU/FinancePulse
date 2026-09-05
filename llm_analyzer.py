@@ -1,18 +1,17 @@
 """
 大模型 (LLM) 财经分析与点评引擎
-支持动态自定义 Prompt 提示词，全兼容 OpenAI 标准接口协议
-具备详细的错误排查与智能诊断机制
+支持动态自定义 Prompt 提示词与思考强度 (Reasoning Depth) 调节
+全兼容 OpenAI 标准接口协议
 """
 import json
 import urllib.request
 import urllib.error
 
-# 预设各大服务商的推荐配置
 LLM_PROVIDERS = {
     "DeepSeek (深度求索)": {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
-        "note": "官方标准模型名 deepseek-chat (对应 V3) 或 deepseek-reasoner (对应 R1)"
+        "note": "官方标准模型名 deepseek-chat (对应 V3) 或 deepseek-reasoner (对应 R1 深度思考)"
     },
     "Kimi / Moonshot (月之暗面)": {
         "base_url": "https://api.moonshot.cn/v1",
@@ -65,20 +64,37 @@ DEFAULT_SYSTEM_PROMPT = """你是一位资深的宏观经济与证券市场投�
 ]
 """
 
+# 针对不同思考强度的温度与引导设定
+REASONING_PROMPTS = {
+    "fast": {
+        "temperature": 0.1,
+        "suffix": "\n[要求: 采用快速提炼模式，严格以事实为依据，点评尽量简明扼要。]"
+    },
+    "balanced": {
+        "temperature": 0.3,
+        "suffix": "\n[要求: 采用深度研判模式，注重宏观经济、行业供需与资本市场情绪的传导关系。]"
+    },
+    "deep": {
+        "temperature": 0.5,
+        "suffix": "\n[要求: 采用长思维链推演模式，深入挖掘事件背后的次级衍生影响、潜在受益受损标的与宏观流动性冲击。]"
+    }
+}
+
 def analyze_news_with_llm(
     news_list: list[dict],
     api_key: str = "",
     base_url: str = "https://api.deepseek.com",
     model: str = "deepseek-chat",
-    system_prompt: str = ""
+    system_prompt: str = "",
+    reasoning_level: str = "balanced"
 ) -> list[dict]:
     """
     调用大模型对财经资讯进行深度结构化分析与点评
+    :param reasoning_level: 思考强度，可选 'fast' (快速), 'balanced' (均衡推荐), 'deep' (深度推演)
     """
     if not news_list:
         return []
 
-    # 如果是本地 Ollama，允许 api_key 为空或填 ollama
     if "localhost" in base_url or "127.0.0.1" in base_url:
         if not api_key:
             api_key = "ollama"
@@ -86,28 +102,29 @@ def analyze_news_with_llm(
         print("[LLM 提示] 未配置 API_KEY，跳过大模型分析。")
         return news_list
 
-    # 规范 base_url 补全
     endpoint = base_url.rstrip("/")
     if not endpoint.endswith("/v1") and not endpoint.endswith("/chat/completions"):
         endpoint = f"{endpoint}/v1/chat/completions"
     elif endpoint.endswith("/v1"):
         endpoint = f"{endpoint}/chat/completions"
 
-    # 整理输入的新闻文本
     input_texts = []
     for idx, item in enumerate(news_list, 1):
         input_texts.append(f"{idx}. [{item.get('time', '')}] {item.get('title', '')} - {item.get('content', '')}")
     user_prompt = "以下是最新抓取的全球与国内财经快讯列表，请精选并给出专业投研点评：\n" + "\n".join(input_texts)
 
-    prompt_to_use = system_prompt.strip() if system_prompt and system_prompt.strip() else DEFAULT_SYSTEM_PROMPT
+    # 结合思考强度
+    prompt_config = REASONING_PROMPTS.get(reasoning_level, REASONING_PROMPTS["balanced"])
+    base_prompt = system_prompt.strip() if system_prompt and system_prompt.strip() else DEFAULT_SYSTEM_PROMPT.strip()
+    full_prompt = base_prompt + prompt_config["suffix"]
 
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": prompt_to_use},
+            {"role": "system", "content": full_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        "temperature": 0.2
+        "temperature": prompt_config["temperature"]
     }
 
     try:
@@ -121,12 +138,11 @@ def analyze_news_with_llm(
             }
         )
 
-        with urllib.request.urlopen(req, timeout=35) as response:
+        with urllib.request.urlopen(req, timeout=40) as response:
             res_body = response.read().decode("utf-8")
             res_json = json.loads(res_body)
             raw_reply = res_json["choices"][0]["message"]["content"].strip()
 
-            # 清洗包裹的 json markdown 代码块
             if "```json" in raw_reply:
                 raw_reply = raw_reply.split("```json")[1].split("```")[0]
             elif "```" in raw_reply:
@@ -134,7 +150,7 @@ def analyze_news_with_llm(
 
             parsed_list = json.loads(raw_reply.strip())
             if isinstance(parsed_list, list) and len(parsed_list) > 0:
-                print(f"[LLM] 大模型分析成功！成功生成 {len(parsed_list)} 条精选专业投研视点。")
+                print(f"[LLM] 大模型分析成功 ({reasoning_level} 强度)！生成 {len(parsed_list)} 条精选专业点评。")
                 return parsed_list
 
     except urllib.error.HTTPError as e:
@@ -144,9 +160,6 @@ def analyze_news_with_llm(
         except Exception:
             pass
         print(f"[LLM 接口错误 HTTP {e.code}] {e.reason} -> 详情: {err_detail}")
-        # 如果是 400 错误，通常是模型名不对
-        if "Model Not Exist" in err_detail or "does not exist" in err_detail or e.code == 400:
-            print(f"[LLM 智能排查] 请检查模型名称 '{model}' 是否正确。DeepSeek 官方模型名为 deepseek-chat 或 deepseek-reasoner。")
     except Exception as e:
         print(f"[LLM 异常] 调用大模型分析异常: {e}，自动降级为原始资讯。")
 

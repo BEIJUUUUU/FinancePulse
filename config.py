@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     "llm_api_key": "",
     "llm_base_url": "https://api.deepseek.com",
     "llm_model": "deepseek-chat",
+    "llm_reasoning_level": "balanced",
     "custom_prompt": "",
     "ui_theme": "System"
 }
@@ -66,5 +67,6 @@ LLM_ENABLED = _active_cfg.get("llm_enabled", False)
 LLM_API_KEY = _active_cfg.get("llm_api_key", "")
 LLM_BASE_URL = _active_cfg.get("llm_base_url", "https://api.deepseek.com")
 LLM_MODEL = _active_cfg.get("llm_model", "deepseek-chat")
+LLM_REASONING_LEVEL = _active_cfg.get("llm_reasoning_level", "balanced")
 CUSTOM_PROMPT = _active_cfg.get("custom_prompt", "")
 UI_THEME = _active_cfg.get("ui_theme", "System")

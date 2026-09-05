@@ -1,133 +1,123 @@
-<div align="center">
+# FinancePulse
 
-# 📈 FinancePulse (财经脉搏)
-### 现代化桌面财经早报 · 智能研报分析与微信推送助手
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![UI](https://img.shields.io/badge/Design-Apple%20HIG%20Fluent-purple.svg)](https://github.com/BEIJUUUUU/FinancePulse)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)](https://github.com/BEIJUUUUU/FinancePulse)
-
-**零成本、零第三方实名限制、极速开箱即用的现代化金融早报助手**  
-集成了 **多信源聚合采集**、**跨源相似度智能去重**、**大模型 (DeepSeek/Kimi/GLM) 投研深度点评**、**Apple 风格现代桌面 GUI** 与 **手机微信秒级卡片弹窗直推**。
-
-</div>
+FinancePulse is a lightweight, high-performance financial news aggregator and intelligent research briefing system. It features multi-source real-time crawling, cross-source similarity deduplication, large language model (LLM) investment commentary, an Apple HIG-inspired desktop client, and native WeChat message dispatch via standard SMTP.
 
 ---
 
-## 🌟 核心特性 (Features)
+## Key Capabilities
 
-- 🍎 **Apple 风格现代极简桌面端**：基于 `CustomTkinter` 遵循 Apple HIG 规范打造，大圆角、纯净卡片层次、单层侧边栏导航、系统深浅色自适应，彻底消除命令行黑框。
-- 📱 **直通手机微信秒级弹窗**：无需购买昂贵的商业第三方接口，无封号与实名风险。利用微信官方内置的「QQ 邮箱提醒」插件，邮件送达即刻在手机微信触发卡片式服务通知。
-- ⚡ **权威多信源毫秒级聚合**：原生直连新浪财经 7x24 全球快讯、华尔街见闻实时直播、财联社等权威源，秒级拉取 10~80+ 条实时全球宏观、A股与港美股热点。
-- 🧠 **创新跨源相似度智能去重**：内置序列字面比对与二元字符特征词袋算法，瞬间识别并归并各大媒体对同一事件的冗余报道，并自动拼接多源标签。
-- 🤖 **全兼容主流大模型 (LLM) 研报点评**：
-  - 内置一键预设：**DeepSeek**、**Kimi (月之暗面)**、**智谱 GLM**、**阿里通义千问**、**OpenAI** 以及 **本地离线私有 Ollama**；
-  - 自动提炼核心事实，生成一句话【AI 投研视点】并标注利好/利空情绪。
-- ⏰ **自由定制自动化定时轮询**：支持【经典三时段（盘前 08:30 / 午盘 12:00 / 盘后 16:00）】与【任意自定义时点列表】，全天候后台静默值守。
-- 📁 **多端精美表格呈现与本地归档**：微信端呈现自适应现代卡片表格，同时每次自动生成带时间戳的本地 `财经热点汇总.csv` 供下载与回溯。
+- **Desktop Client Architecture**: Built with CustomTkinter following Apple Human Interface Guidelines (HIG). Provides native high-DPI scaling, smooth rendering, dedicated taskbar application identity, and automatic light/dark mode adaptation.
+- **Zero-Intermediary WeChat Dispatch**: Utilizes standard SMTP protocol coupled with the official WeChat QQ Mail Notification plugin. Eliminates dependency on commercial third-party notification services, account verification hurdles, and risk of rate-limiting or suspensions.
+- **Multi-Source Real-Time Ingestion**: Directly interfaces with major financial streams including Sina Finance 7x24, Wallstreetcn Live, and CLS, supporting on-demand acquisition of 10 to 80+ real-time macroeconomic and market events.
+- **Algorithmic Cross-Source Deduplication**: Incorporates sequence matching and character n-gram token overlap algorithms to identify and merge concurrent coverage of identical market events across multiple providers.
+- **LLM Research & Sentiment Synthesis**: Fully compatible with OpenAI-compliant endpoints (DeepSeek, Kimi, Zhipu GLM, Qwen, and local Ollama deployments). Generates concise key-fact summaries, investment sentiment tags (Bullish / Bearish / Neutral), and sector impact assessments, with adjustable reasoning intensity and fully customizable system prompts.
+- **Automated Scheduling**: Supports both classic financial session intervals (pre-market 08:30, midday 12:00, post-market 16:00) and custom time specifications for unattended background operation.
+- **Structured Data Export**: Automatically archives generated daily intelligence into timestamped CSV/Excel records while rendering responsive HTML cards for mobile clients.
 
 ---
 
-## 📁 项目结构 (Project Structure)
+## Project Structure
 
 ```text
 FinancePulse/
-├── gui.pyw                 # 🌟 Windows 无黑框桌面客户端启动入口 (推荐双击运行)
-├── run_gui.bat             # 🌟 一键批处理启动脚本
-├── gui.py                  # Apple 风格桌面 GUI 源码 (CustomTkinter)
-├── fetcher.py              # 多信源 (新浪7x24 / 华尔街见闻 / 财联社) 聚合采集引擎
-├── processor.py            # 跨源相似度智能去重与 HTML 研报卡片生成器
-├── llm_analyzer.py         # 大模型投研深度分析引擎 (全兼容各大主流厂商)
-├── email_sender.py         # 严格遵循 RFC5322 规范的邮件与微信直推模块
-├── main.py                 # 无头/服务器后台运行入口 (支持 --cron 定时)
-├── config.py               # 配置加载与驱动层
-├── settings.example.json   # 配置文件模板 (真实配置 settings.json 已受 gitignore 保护)
-├── requirements.txt        # 依赖清单
-├── .gitignore              # 严格隔离个人敏感凭据与本地数据
-├── LICENSE                 # MIT 开源许可证
-└── README.md               # 项目使用说明书
+├── gui.pyw                 # Windows windowless launcher (executes via pythonw)
+├── run_gui.bat             # Quick batch script launcher
+├── gui.py                  # Desktop application entry and UI logic
+├── fetcher.py              # Multi-source financial stream ingestion engine
+├── processor.py            # Similarity deduplication and HTML report generator
+├── llm_analyzer.py         # LLM synthesis and reasoning engine
+├── email_sender.py         # RFC5322-compliant SMTP dispatch engine
+├── main.py                 # Headless CLI entry for server and cron deployments
+├── config.py               # Runtime configuration loader
+├── settings.example.json   # Template configuration file
+├── requirements.txt        # Python dependency manifest
+├── .gitignore              # Repository exclusion rules
+├── LICENSE                 # MIT License
+└── README.md               # Documentation
 ```
 
 ---
 
-## 🚀 极速上手 (Quick Start)
+## Installation
 
-### 1. 克隆本项目
+### 1. Clone Repository
 ```bash
 git clone https://github.com/BEIJUUUUU/FinancePulse.git
 cd FinancePulse
 ```
 
-### 2. 安装依赖
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
-> 如需启用额外的高阶数据源支持，可选安装：`pip install akshare pandas`
 
 ---
 
-## 💻 使用方式 (Usage)
+## Usage
 
-### 方式 A：双击运行桌面 GUI (最推荐，小白友好)
-在 Windows 资源管理器中：
-* **直接双击 `gui.pyw`**（或者双击 `run_gui.bat`）；
-* 客户端秒级拉起，完全没有任何黑框终端！
+### Desktop Graphical Interface
+On Windows, execute directly by launching `gui.pyw` or `run_gui.bat`. The application launches without spawning a terminal console window.
 
-### 方式 B：服务器 / 命令行静默运行
-适合部署在 Linux / Windows 服务器进行无人值守推送：
-* **执行单次推送**：
+1. Navigate to the Configuration panel to provide sender email credentials and SMTP authorization tokens.
+2. Select desired information sources and specify fetch quantity.
+3. Fetch real-time market bulletins and trigger AI synthesis on demand.
+4. Execute single-click dispatch to email and WeChat, or enable the background scheduler.
+
+### Headless Server / CLI Mode
+Suitable for deployment on remote servers or local scheduled tasks:
+
+- Single run:
   ```bash
   python main.py
   ```
-* **开启全天候定时服务**：
+- Background scheduler:
   ```bash
   python main.py --cron
   ```
 
 ---
 
-## 🔑 3 步打通微信秒级推送 (WeChat Setup)
+## Notification Setup (WeChat Delivery)
 
-### 第一步：获取 QQ 邮箱的「16位 SMTP 授权码」
-1. 电脑浏览器登录 [QQ 邮箱官网 (mail.qq.com)](https://mail.qq.com)；
-2. 点击顶部 **「设置」** ➔ 切换至 **「账户」** 选项卡；
-3. 向下滚动至 **「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」**；
-4. 开启 **「POP3/SMTP服务」**，按提示用手机发送一条短信验证；
-5. 验证通过后页面会弹出一串 **16 位英文授权码**（例如：`abcdefghijklmnop`），复制备用。
-
-### 第二步：手机微信开启「QQ 邮箱提醒」
-1. 打开手机微信，在顶部搜索栏搜索 **「QQ邮箱提醒」** 插件并进入；
-2. 确保开启提醒并绑定你的 QQ 邮箱；
-3. 只要程序发送邮件，手机微信就会像收到微信消息一样立即弹出卡片提醒！
-
-### 第三步：在软件中保存设置
-在客户端的 **【系统与 AI 配置】** 页面中：
-* 发件人填入你的 QQ 邮箱；
-* 填入 16 位授权码；
-* **接收人邮箱直接填你自己的 QQ 邮箱（或留空即可）**：自己发给自己 100% 进收件箱，微信即时弹窗，绝不会被拦截！
+1. **Obtain SMTP Authorization Code**:
+   - Access the QQ Mail web portal (`mail.qq.com`) and navigate to Settings > Accounts.
+   - Locate the POP3/IMAP/SMTP service section and enable POP3/SMTP service.
+   - Complete SMS verification to generate a 16-character alphanumeric authorization token.
+2. **Enable WeChat Integration**:
+   - Open WeChat, search for the official "QQ Mail Notification" (QQ邮箱提醒) feature, and enable it.
+   - Bind the corresponding QQ email account.
+3. **Configure FinancePulse**:
+   - In FinancePulse Settings, enter your QQ email in the sender field.
+   - Input the 16-character authorization token.
+   - Set the recipient email to match the sender email (or leave blank to default to self-delivery).
 
 ---
 
-## 🤖 大模型 (LLM) 接入支持
+## LLM Integration Reference
 
-在设置中心选择预设厂商并填入 API Key：
-* **DeepSeek (深度求索)**：官方 `https://api.deepseek.com`，模型 `deepseek-chat`
-* **Kimi / Moonshot (月之暗面)**：`https://api.moonshot.cn/v1`，模型 `moonshot-v1-8k`
-* **智谱 AI (GLM)**：`https://open.bigmodel.cn/api/paas/v4`，模型 `glm-4-flash`
-* **阿里通义千问 (Qwen)**：`https://dashscope.aliyuncs.com/compatible-mode/v1`，模型 `qwen-turbo`
-* **OpenAI (ChatGPT)**：`https://api.openai.com/v1`，模型 `gpt-4o-mini`
-* **Ollama 本地私有大模型**：`http://localhost:11434/v1`，模型 `qwen2.5:7b`（纯本地离线，无需 API Key）
+| Provider | Base URL | Default Model | Authentication |
+| :--- | :--- | :--- | :--- |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` | API Key required |
+| Kimi / Moonshot | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | API Key required |
+| Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` | API Key required |
+| Alibaba Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-turbo` | API Key required |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` | API Key required |
+| Ollama (Local) | `http://localhost:11434/v1` | `qwen2.5:7b` | None (Local instance) |
+
+Reasoning intensity can be adjusted across three modes:
+- **Fast**: Minimal temperature (0.1), highly focused on factual summary.
+- **Balanced**: Standard temperature (0.3), balanced macroeconomic and market sentiment analysis.
+- **Deep**: Extended reasoning chain (0.5), deeper supply-chain and derivative market impact evaluation.
 
 ---
 
-## 🛡️ 安全与隐私声明
+## Security and Privacy
 
-- 本项目内置了完善的 `.gitignore` 规则，用户的密码凭据保存在本地的 `settings.json` 中，**该文件已被严格忽略，绝不会上传至公开仓库**。
-- 请妥善保管个人的 16 位邮箱授权码与大模型 API Key。
+- Local configuration records (`settings.json`) and generated tabular datasets (`*.csv`, `*.xlsx`) are excluded by default via `.gitignore` to prevent credential exposure.
+- All network communications with LLM endpoints and SMTP servers utilize TLS/SSL encryption.
 
 ---
 
-## 📄 开源许可证 (License)
+## License
 
-本项目基于 [MIT License](LICENSE) 协议开源。欢迎提交 Issue 与 Pull Request！
+This software is released under the [MIT License](LICENSE).

@@ -15,19 +15,22 @@ from llm_analyzer import analyze_news_with_llm
 def run_once():
     """执行一次完整的财经快讯获取、AI分析与邮件推送任务"""
     now_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now_time_str}] 🚀 开始抓取最新财经快讯...")
+    print(f"[{now_time_str}] 正在抓取最新财经快讯...")
     
     # 1. 抓取快讯
-    raw_news = fetch_cls_news(limit=config.NEWS_LIMIT)
+    sources = getattr(config, "SOURCES", ["sina", "wscn"])
+    limit = getattr(config, "NEWS_LIMIT", 20)
+    raw_news = fetch_cls_news(limit=limit, enabled_sources=sources)
     if not raw_news:
         print("[提示] 本次未获取到最新资讯，流程结束。")
         return
 
-    # 2. 清洗过滤
-    cleaned_news = filter_and_clean_news(raw_news, keywords=config.FILTER_KEYWORDS)
-    print(f"[处理] 共获取到 {len(raw_news)} 条快讯，有效保留 {len(cleaned_news)} 条。")
+    # 2. 清洗去重
+    dedup = getattr(config, "ENABLE_DEDUP", True)
+    cleaned_news = filter_and_clean_news(raw_news, keywords=config.FILTER_KEYWORDS, dedup_threshold=0.48 if dedup else 0.99, max_limit=limit)
+    print(f"[处理] 抓取原始资讯 {len(raw_news)} 条，去重后有效保留 {len(cleaned_news)} 条。")
 
-    # 3. 若启用了大模型，调用 AI 进行研报提炼
+    # 3. 若启用了大模型，自动调用 AI 进行研报提炼与情绪标注
     final_news = cleaned_news
     if config.LLM_ENABLED and config.LLM_API_KEY:
         print(f"[AI 分析] 正在调用大模型 ({config.LLM_MODEL}) 进行深度提炼与点评...")
@@ -35,10 +38,12 @@ def run_once():
             cleaned_news,
             api_key=config.LLM_API_KEY,
             base_url=config.LLM_BASE_URL,
-            model=config.LLM_MODEL
+            model=config.LLM_MODEL,
+            system_prompt=getattr(config, "CUSTOM_PROMPT", ""),
+            reasoning_level=getattr(config, "LLM_REASONING_LEVEL", "balanced")
         )
 
-    # 4. 组织表格并导出 Excel/CSV 本地备份
+    # 4. 组织表格并导出本地备份
     excel_file = "D:/Desktop/finance-news-bot/财经热点汇总.csv"
     try:
         export_to_excel(final_news, output_path=excel_file)
@@ -57,7 +62,7 @@ def run_once():
         receiver = config.RECEIVER_EMAIL or config.SENDER_EMAIL
         print(f"[邮件推送] 正在推送到邮箱: {receiver} ...")
         html_card = build_html_card(final_news)
-        subject_str = f"📈 财经早报与智能热点精选 ({datetime.now().strftime('%m月%d日 %H:%M')})"
+        subject_str = f"财经早报与智能热点精选 ({datetime.now().strftime('%m月%d日 %H:%M')})"
         send_email_digest(
             smtp_server=config.SMTP_SERVER,
             smtp_port=config.SMTP_PORT,
@@ -69,11 +74,11 @@ def run_once():
             attachment_path=excel_file
         )
     else:
-        print("[提示] 尚未配置 SENDER_EMAIL 或 SENDER_AUTH_CODE。请在 config.py 或桌面 GUI 中配置。")
+        print("[提示] 尚未配置 SENDER_EMAIL 或 SENDER_AUTH_CODE。")
 
 def main():
-    parser = argparse.ArgumentParser(description="Finance News Bot - 财经早报与微信提醒助手")
-    parser.add_argument("--cron", action="store_true", help="开启定时运行模式 (每天早中晚固定时间推送)")
+    parser = argparse.ArgumentParser(description="FinancePulse - 财经早报与微信提醒助手")
+    parser.add_argument("--cron", action="store_true", help="开启定时运行模式 (每天固定时间自动推送)")
     args = parser.parse_args()
 
     if args.cron:
@@ -81,9 +86,9 @@ def main():
             import schedule
             import time
             print("[模式] 已启动定时推送服务...")
-            schedule.every().day.at("08:30").do(run_once)  # 盘前早报
-            schedule.every().day.at("12:00").do(run_once)  # 午间回顾
-            schedule.every().day.at("16:00").do(run_once)  # 盘后总结
+            times = getattr(config, "_active_cfg", {}).get("schedule_times", ["08:30", "12:00", "16:00"])
+            for t in times:
+                schedule.every().day.at(t).do(run_once)
 
             run_once()
             while True:
