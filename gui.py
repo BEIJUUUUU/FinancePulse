@@ -236,6 +236,19 @@ class AppleStyleFinanceApp(ctk.CTk):
         )
         self.btn_ai.pack(side="left", padx=6, pady=12)
 
+        self.btn_test_ai_quick = ctk.CTkButton(
+            toolbar,
+            text="🧪 测试 AI 是否生效",
+            corner_radius=10,
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11, weight="bold"),
+            fg_color=("#e0e7ff", "#312e81"),
+            text_color=("#4338ca", "#c7d2fe"),
+            hover_color=("#c7d2fe", "#3730a3"),
+            width=130,
+            command=self._diagnose_ai_effective
+        )
+        self.btn_test_ai_quick.pack(side="left", padx=6, pady=12)
+
         self.btn_export = ctk.CTkButton(
             toolbar,
             text="📁 导出表格",
@@ -244,7 +257,7 @@ class AppleStyleFinanceApp(ctk.CTk):
             fg_color=("gray85", "gray35"),
             hover_color=("gray75", "gray40"),
             text_color=("black", "white"),
-            width=90,
+            width=85,
             command=self._on_export
         )
         self.btn_export.pack(side="left", padx=6, pady=12)
@@ -256,10 +269,19 @@ class AppleStyleFinanceApp(ctk.CTk):
             font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold"),
             fg_color=APPLE_BLUE,
             hover_color=APPLE_BLUE_HOVER,
-            width=175,
+            width=170,
             command=self._on_send_now
         )
         self.btn_push.pack(side="right", padx=16, pady=12)
+
+        # AI 状态指示胶囊
+        self.lbl_ai_status_badge = ctk.CTkLabel(
+            toolbar,
+            text="AI 未启用",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11),
+            text_color="gray"
+        )
+        self.lbl_ai_status_badge.pack(side="right", padx=10)
 
         self.cards_scroll = ctk.CTkScrollableFrame(
             page,
@@ -734,6 +756,165 @@ class AppleStyleFinanceApp(ctk.CTk):
         else:
             self.ent_custom_times.configure(state="normal")
 
+    def _update_ai_status_badge(self):
+        """更新顶部工具栏的 AI 状态徽章"""
+        enabled = self.cfg.get("llm_enabled", False)
+        api_key = self.cfg.get("llm_api_key", "").strip()
+        base_url = self.cfg.get("llm_base_url", "")
+        model = self.cfg.get("llm_model", "deepseek-chat")
+
+        if enabled and (api_key or "localhost" in base_url):
+            self.lbl_ai_status_badge.configure(
+                text=f"🟢 AI 已就绪 ({model})",
+                text_color=APPLE_GREEN
+            )
+        elif enabled and not api_key:
+            self.lbl_ai_status_badge.configure(
+                text="⚠️ AI 未配秘钥",
+                text_color="#f59e0b"
+            )
+        else:
+            self.lbl_ai_status_badge.configure(
+                text="⚪ AI 未启用",
+                text_color="gray"
+            )
+
+    def _diagnose_ai_effective(self):
+        """现场诊断 AI 是否生效，弹出对比卡片"""
+        api_key = self.ent_ai_key.get().strip()
+        base_url = self.ent_ai_url.get().strip()
+        model = self.ent_ai_model.get().strip()
+
+        if not api_key and "localhost" not in base_url:
+            messagebox.showwarning("提示", "AI 尚未生效！请先在【系统与 AI 配置】中填写大模型 API Key。")
+            self._switch_page("settings")
+            return
+
+        self.btn_test_ai_quick.configure(state="disabled", text="正在诊断...")
+        self.log(f"🧪 开始诊断 AI 是否生效 (模型: {model}) ...")
+
+        def worker():
+            start_t = time.time()
+            # 优先取当前列表中第一条快讯，若无则使用标准测试事件
+            if self.current_news_list:
+                sample_item = [self.current_news_list[0]]
+            else:
+                sample_item = [{
+                    "time": datetime.now().strftime("%H:%M"),
+                    "title": "中央汇金再次扩大ETF增持范围",
+                    "content": "中国人民银行与中央汇金表示，充分认可当前A股市场长期配置价值，今日已再次扩大交易型开放式指数基金(ETF)增持范围，稳步维护资本市场平稳运行。"
+                }]
+
+            try:
+                res = analyze_news_with_llm(
+                    sample_item,
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=model,
+                    system_prompt=self.txt_prompt.get("1.0", "end").strip()
+                )
+                duration = round(time.time() - start_t, 2)
+
+                if res and "ai_comment" in res[0]:
+                    out = res[0]
+                    self.after(0, lambda: self._show_ai_diagnosis_dialog(sample_item[0], out, duration, model))
+                    self.after(0, lambda: self.log(f"🎉 诊断完毕：AI 引擎 100% 正常生效！响应耗时: {duration}s。"))
+                else:
+                    self.after(0, lambda: messagebox.showwarning("诊断结果", "API 返回了数据，但未包含标准 ai_comment 点评字段，请检查 Prompt。"))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("诊断失败", f"AI 未能成功生效！错误信息:\n{e}"))
+                self.after(0, lambda: self.log(f"❌ AI 诊断失败: {e}"))
+            finally:
+                self.after(0, lambda: self.btn_test_ai_quick.configure(state="normal", text="🧪 测试 AI 是否生效"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_ai_diagnosis_dialog(self, original: dict, analyzed: dict, duration: float, model: str):
+        """弹出高颜值 Apple 风格 AI 生效对比诊断窗口"""
+        diag_win = ctk.CTkToplevel(self)
+        diag_win.title("🧪 AI 生效状态实时诊断报告")
+        diag_win.geometry("620x520")
+        diag_win.minsize(540, 440)
+        diag_win.grab_set()
+
+        container = ctk.CTkFrame(diag_win, corner_radius=16, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # 状态卡片
+        status_bar = ctk.CTkFrame(container, corner_radius=12, fg_color=("#ecfdf5", "#064e3b"))
+        status_bar.pack(fill="x", pady=(0, 14))
+        ctk.CTkLabel(
+            status_bar,
+            text=f"✅ AI 引擎 100% 正常生效！ · 模型: {model} · 响应耗时: {duration} 秒",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=13, weight="bold"),
+            text_color=("#047857", "#34d399")
+        ).pack(anchor="w", padx=16, pady=10)
+
+        # 对比卡片 1: 原始输入
+        c_orig = ctk.CTkFrame(container, corner_radius=12, fg_color=("white", "#27272a"), border_width=1, border_color=("gray85", "gray30"))
+        c_orig.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(c_orig, text="📰 原始抓取快讯输入:", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold")).pack(anchor="w", padx=14, pady=(10, 4))
+        ctk.CTkLabel(
+            c_orig,
+            text=f"【{original.get('title', '')}】\n{original.get('content', '')}",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11),
+            text_color=("gray30", "gray70"),
+            wraplength=520,
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 12))
+
+        # 对比卡片 2: AI 实际生效产出
+        c_ai = ctk.CTkFrame(container, corner_radius=12, fg_color=("white", "#1c1c1e"), border_width=1, border_color=("gray85", "gray30"))
+        c_ai.pack(fill="both", expand=True, pady=(0, 14))
+
+        ctk.CTkLabel(c_ai, text="🤖 大模型实时提炼与视点产出:", font=ctk.CTkFont(family="Microsoft YaHei UI", size=13, weight="bold"), text_color=APPLE_PURPLE).pack(anchor="w", padx=14, pady=(12, 6))
+
+        info_row = ctk.CTkFrame(c_ai, fg_color="transparent")
+        info_row.pack(fill="x", padx=14, pady=4)
+        ctk.CTkLabel(info_row, text=f"精练标题: {analyzed.get('title', '')}", font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold")).pack(side="left")
+        ctk.CTkLabel(info_row, text=f"领域: {analyzed.get('tag', '综合')}", font=ctk.CTkFont(family="Microsoft YaHei UI", size=11), text_color=APPLE_PURPLE).pack(side="right", padx=6)
+        
+        sent = analyzed.get("sentiment", "中性")
+        sent_color = APPLE_RED if "利好" in sent else (APPLE_GREEN if "利空" in sent else "gray")
+        ctk.CTkLabel(info_row, text=f"● 情绪: {sent}", font=ctk.CTkFont(family="Microsoft YaHei UI", size=11, weight="bold"), text_color=sent_color).pack(side="right", padx=6)
+
+        ctk.CTkLabel(
+            c_ai,
+            text=f"核心事实: {analyzed.get('content', '')}",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=11),
+            text_color=("gray20", "gray80"),
+            wraplength=520,
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(4, 8))
+
+        # 视点框
+        ai_box = ctk.CTkFrame(c_ai, corner_radius=8, fg_color=("#f5f3ff", "#1e1b4b"))
+        ai_box.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkLabel(
+            ai_box,
+            text=f"🤖 实际生成投研视点：{analyzed.get('ai_comment', '')}",
+            font=ctk.CTkFont(family="Microsoft YaHei UI", size=12, weight="bold"),
+            text_color=("#6d28d9", "#c084fc"),
+            wraplength=500,
+            justify="left"
+        ).pack(anchor="w", padx=12, pady=10)
+
+        # 底部确定关闭
+        ctk.CTkButton(
+            container,
+            text="我知道了 (AI 正常)",
+            height=36,
+            corner_radius=10,
+            fg_color=APPLE_BLUE,
+            hover_color=APPLE_BLUE_HOVER,
+            command=diag_win.destroy
+        ).pack(fill="x")
+        mode = self.sched_mode_var.get()
+        if mode == "classic":
+            self.ent_custom_times.configure(state="disabled")
+        else:
+            self.ent_custom_times.configure(state="normal")
+
     def _on_count_changed(self, choice: str):
         try:
             self.cfg["news_limit"] = int(choice)
@@ -791,6 +972,7 @@ class AppleStyleFinanceApp(ctk.CTk):
         self.sched_mode_var.set(mode)
         self.ent_custom_times.insert(0, self.cfg.get("custom_times", "09:15, 14:30, 21:00"))
         self._on_sched_mode_changed()
+        self._update_ai_status_badge()
 
     def _get_enabled_sources(self):
         sources = []
@@ -819,6 +1001,7 @@ class AppleStyleFinanceApp(ctk.CTk):
 
         if config.save_config(self.cfg):
             self.log("✅ 所有配置已持久化保存！")
+            self._update_ai_status_badge()
             messagebox.showinfo("成功", "所有系统与 AI 配置已保存生效！")
         else:
             messagebox.showerror("错误", "保存失败，请检查读写权限。")
